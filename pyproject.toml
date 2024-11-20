@@ -1,5 +1,7 @@
 [build-system]
-requires = ["setuptools>=61.0", "versioningit~=2.0"]
+requires = ["setuptools>=61.0",
+            "versioningit~=2.0",
+            ]
 build-backend = "setuptools.build_meta"
 
 # Self-descriptive entries which should always be present
@@ -23,11 +25,23 @@ requires-python = ">=3.8"
 #dependencies = [
 #    "importlib-resources;python_version<'3.10'",
 #]
+dependencies = [
+    "loguru",
+    "tqdm",
+    "typer",
+    "ase",
+    "vesin",
+    "mace-torch",
+    "scipy",
+]
 
 # Update the urls once the hosting is set up.
 #[project.urls]
 #"Source" = "https://github.com/<username>/mc_mace/"
 #"Documentation" = "https://mc_mace.readthedocs.io/"
+
+[project.scripts]
+pymc = "mc_mace.pymc:main"
 
 [project.optional-dependencies]
 test = [
@@ -82,3 +96,37 @@ default-tag = "1.0.0"
 
 [tool.versioningit.write]
 file = "mc_mace/_version.py"
+
+[tool.black]
+line-length = 120
+include = '\.pyi?$'
+exclude = '''
+/(
+    \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | _build
+  | buck-out
+  | build
+  | dist
+)/
+'''
+[tool.isort]
+profile = "black"
+
+[tool.mypy]
+warn_return_any = true
+warn_unused_configs = true
+exclude =  [
+    "^(\\.\\/build.*|devtools/scripts/create_conda_env\\.py)$",
+    '^devtools/scripts/create_conda_env\.py$',
+    "devtools/*"
+]
+
+[[tool.mypy.overrides]]
+module = [
+  "devtools.*",
+]
+follow_imports = "skip"

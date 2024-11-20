@@ -1,0 +1,7 @@
+loguru==0.7.2
+tqdm==4.67.0
+typer==0.13.0
+ase==3.23.0
+vesin==0.2.0
+mace-torch== 0.3.8
+scipy

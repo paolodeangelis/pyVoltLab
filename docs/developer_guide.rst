@@ -1,4 +1,4 @@
 Developer Guide
 ===============
 
-This page details how to contribute to pyMC. 
+This page details how to contribute to pyMC.

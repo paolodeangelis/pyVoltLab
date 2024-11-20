@@ -1,4 +1,4 @@
 User Guide
 ===============
 
-This page details how to use pyMC. 
+This page details how to use pyMC.
