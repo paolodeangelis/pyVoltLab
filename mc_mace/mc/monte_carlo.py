@@ -13,6 +13,8 @@ from scipy.constants import N_A, Planck, elementary_charge
 from mc_mace.utils.neighborlist import FastPrimitiveNeighborList
 from mc_mace.utils.profiler import MethodProfiler
 
+VACUUM_ENERGY_DENSITY = 0.0
+MIN_VOLUME = 3.0**3
 ATTEMPT_TYPE = ["volume", "position", "creation", "destruction"]
 vdw_radii = np.nan_to_num(vdw_radii, nan=np.nanmean(vdw_radii))
 
@@ -41,6 +43,10 @@ class MC:
         cutoff: float = 6.0,
         max_displacement: float = 0.1,
         max_volume_change: float = 0.0,
+        creation_max_attempts: int = 100,
+        destruction_max_attempts: int = 100,
+        n_max: int = 99999,
+        n_min: int = 0,
     ):
         """
         Initialize the Metropolis MC simulation.
@@ -57,6 +63,10 @@ class MC:
             cutoff (float): Neighbor list cutoff radius (default: 6.0 Å).
             max_displacement (float): Maximum atomic displacement per move.
             max_volume_change (float): Maximum volume change per step.
+            creation_max_attempts (int): Maximum times of creation attempts.
+            destruction_max_attempts (int): Maximum times of destruction attempts.
+            n_max (int): Maximum number of atoms in the system.
+            n_min (int): Minimum number of atoms in the system.
         """
         self.atoms_old = atoms.copy()
         self.atoms_new = atoms.copy()
@@ -77,12 +87,14 @@ class MC:
         self.rng = random_number_gen or np.random.default_rng(seed=-1)
         self.accept = {t: 0 for t in ATTEMPT_TYPE}
         self.reject = {t: 0 for t in ATTEMPT_TYPE}
-        self._creation_attempts = 100
-        self._destruction_attempts = 100
+        self.creation_max_attempts = creation_max_attempts
+        self.destruction_max_attempts = destruction_max_attempts
         self._aindex = 0
         self.deBroglie_wl: list[float] = [0.0]
         self._E_old = 0.0
         self._E_new = 0.0
+        self._n_max = n_max
+        self._n_min = n_min
         self._compute_deBroglie_wavelength()
 
     ### Private Methods ###
@@ -184,8 +196,16 @@ class MC:
         Returns:
             float: Energy difference in eV.
         """
-        self._E_old = self.atoms_old.get_potential_energy()
-        self._E_new = self.atoms_new.get_potential_energy()
+        if len(self.atoms_old) > 0:
+            self._E_old = self.atoms_old.get_potential_energy()
+        else:
+            logger.warning(self._logger_prefix() + "No atoms in old system")
+            self._E_old = VACUUM_ENERGY_DENSITY * self.atoms_old.get_volume()
+        if len(self.atoms_new) > 0:
+            self._E_new = self.atoms_new.get_potential_energy()
+        else:
+            logger.warning(self._logger_prefix() + "No atoms in new system")
+            self._E_new = VACUUM_ENERGY_DENSITY * self.atoms_new.get_volume()
         logger.debug(self._logger_prefix() + f"Energy difference: E_old={self._E_old}, E_new={self._E_new}")
         return self._E_new - self._E_old
 
@@ -432,22 +452,26 @@ class MC:
         logger.debug(self._logger_prefix() + f"Cell (new) length=[{length[0]}, {length[1]}, {length[2]}]")
         Na = len(self.atoms_old)
         delta_E = self.get_energy_difference()
-        logger.debug(self._logger_prefix() + f"PE difference, ΔE={delta_E:.3f} eV")
-        P_acc = np.min(
-            [
-                1,
-                np.exp(-self.beta * (delta_E + self.P * (V_new - V_old)))
-                / np.exp(-Na * np.log(V_new / V_old)),  # https://doi.org/10.1103/PhysRevE.103.L061303 Eq.(7)
-            ]
-        )
-        logger.debug(self._logger_prefix() + f"Acceptance probability, P_acc={P_acc:.3e}")
-        logger.info(
-            self._logger_prefix() + f"PE difference ΔE={delta_E:.3f} eV, Acceptance probability, P_acc={P_acc:.3e}"
-        )
-        x = self.rng.random()
-        logger.debug(self._logger_prefix() + f"Random number x={x:.3f}")
-        acc_state = bool(x < P_acc)
-        logger.debug(self._logger_prefix() + f"Accepted={acc_state}")
+        if V_new > MIN_VOLUME:
+            logger.debug(self._logger_prefix() + f"PE difference, ΔE={delta_E:.3f} eV")
+            P_acc = np.min(
+                [
+                    1,
+                    np.exp(-self.beta * (delta_E + self.P * (V_new - V_old)))
+                    / np.exp(-Na * np.log(V_new / V_old)),  # https://doi.org/10.1103/PhysRevE.103.L061303 Eq.(7)
+                ]
+            )
+            logger.debug(self._logger_prefix() + f"Acceptance probability, P_acc={P_acc:.3e}")
+            logger.info(
+                self._logger_prefix() + f"PE difference ΔE={delta_E:.3f} eV, Acceptance probability, P_acc={P_acc:.3e}"
+            )
+            x = self.rng.random()
+            logger.debug(self._logger_prefix() + f"Random number x={x:.3f}")
+            acc_state = bool(x < P_acc)
+            logger.debug(self._logger_prefix() + f"Accepted={acc_state}")
+        else:
+            acc_state = False
+            logger.warning(self._logger_prefix() + f"V_new={V_new} A^3 is too small")
         if acc_state:
             logger.success(self._logger_prefix() + f"Accepted (E = {self._E_new:.3f})")
             self.accept["volume"] += 1
@@ -462,13 +486,21 @@ class MC:
     @profiler_main.track
     def attempt_position_change(self) -> bool:
         """Attempt to move an atom in the system."""
+        if len(self.atoms_old) < 1:
+            acc_state = False
+            self.reject["position"] += 1
+            logger.warning(self._logger_prefix() + "No atoms in the system")
+            logger.info(self._logger_prefix() + "Rejected (No atoms to move)")
+            # Moving to next step:
+            self._update_step()
+            return acc_state
         index = self._get_next_moving_atom()
         old_position = np.array(self.atoms_old.positions[index])
         max_displacement = self.max_step["position"]
         displacement = self.rng.uniform(-max_displacement, max_displacement, size=(3,))
         logger.info(
             self._logger_prefix()
-            + f"Attempt moving atom {index:>5d} ({self.atoms_old.get_chemical_symbols()[index]:3s}) by a displacement [{displacement[0]:6.3f}, {displacement[1]:6.3f}, {displacement[2]:6.3f}]"
+            + f"Attempt moving atom {index:>5d} ({self.atoms_old.get_chemical_symbols()[index]:s}) by a displacement [{displacement[0]:6.3f}, {displacement[1]:6.3f}, {displacement[2]:6.3f}]"
         )
         new_position = old_position + displacement
         self.atoms_new.positions[index] = new_position
@@ -520,14 +552,18 @@ class MC:
         element = self.insert_elements[i_element]
         deBroglie_wl = self.deBroglie_wl[i_element]
         Na = len(self.atoms_old)
+        Ne = max(1, len(np.where(self.atoms_old.get_atomic_numbers() == atomic_numbers[element])[0]))
         V = self.atoms_old.get_volume()
         k = 0
         acc_state = False
         logger.info(self._logger_prefix() + f"Attempt creation of {element} atom")
-        logger.info(self._logger_prefix() + f"Running {self._creation_attempts} attempts of creations;")
-        while k < self._creation_attempts and acc_state is False:
+        logger.info(self._logger_prefix() + f"Running {self.creation_max_attempts} attempts of creations;")
+        log_second_prefix = ""
+        while (
+            k < self.creation_max_attempts and acc_state is False and len(self.atoms_new) + 1 < self._n_max
+        ):  # and k <= Ne:
             k += 1
-            log_second_prefix = f"[ k={k:>3d} / {self._creation_attempts:>3d} ] "
+            log_second_prefix = f"[ k={k:>3d} / {self.creation_max_attempts:>3d} ] "
             new_r_fractional = self.rng.uniform(0, 1, size=3)
             new_r_cartesian = self.atoms_old.cell.cartesian_positions(new_r_fractional)
             logger.debug(
@@ -579,6 +615,13 @@ class MC:
             logger.success(self._logger_prefix() + f"Accepted (E = {self._E_new:.3f})")
             self.accept["creation"] += 1
         else:
+            if k == Ne and self.creation_max_attempts != Ne:
+                logger.debug(
+                    self._logger_prefix()
+                    + f"Attempts stopped early to balance with the destruction step (max attempts = {k})"
+                )
+            if len(self.atoms_new) + 1 == self._n_max:
+                logger.warning(self._logger_prefix() + f"The system reached the max allowed  ({self._n_max})")
             self.reject["creation"] += 1
             self.restore_state()
             self.neighbor_list_new = self.build_neighbor_list(self.atoms_new)
@@ -596,19 +639,25 @@ class MC:
         deBroglie_wl = self.deBroglie_wl[i_element]
         Na = len(self.atoms_old)
         V = self.atoms_old.get_volume()
-        k = 0
         acc_state = False
         atoms_candidates = np.where(self.atoms_old.get_atomic_numbers() == atomic_numbers[element])[0]
         self.rng.shuffle(atoms_candidates)
         logger.info(self._logger_prefix() + f"Attempt destruction of {element} atom")
-        logger.info(self._logger_prefix() + f"Running {self._creation_attempts} attempts of destruction")
+        logger.info(self._logger_prefix() + f"Running {self.creation_max_attempts} attempts of destruction")
+        log_second_prefix = ""
         if len(atoms_candidates) == 0:
             logger.warning(self._logger_prefix() + f"No {element} atoms in the system")
             acc_state = False
-        for index in atoms_candidates:
-            if len(self.atoms_new) > 1:
+        k = 0
+
+        # for index in atoms_candidates:
+        if len(self.atoms_new) >= 1:
+            while (
+                k < self.destruction_max_attempts and acc_state is False and len(self.atoms_new) - 1 > self._n_min
+            ):  # and k <= Ne:
+                index = atoms_candidates[k]
                 k += 1
-                log_second_prefix = f"[ k={k:>3d} / {self._creation_attempts:>3d} ] "
+                log_second_prefix = f"[ k={k:>3d} / {self.creation_max_attempts:>3d} ] "
                 position = self.atoms_new.positions[index, :]
                 position_frac = self.atoms_old.cell.scaled_positions(position)
                 logger.debug(
@@ -640,17 +689,18 @@ class MC:
                 logger.debug(self._logger_prefix() + log_second_prefix + f"Random number x={x:.3f}")
                 acc_state = x < P_acc
                 logger.debug(self._logger_prefix() + log_second_prefix + f"Accepted={acc_state}")
-            else:
-                logger.warning(
-                    self._logger_prefix() + log_second_prefix + "On one atoms in the box, impossible removing atoms"
-                )
-                acc_state = False
-                logger.debug(self._logger_prefix() + log_second_prefix + f"Accepted={acc_state}")
-            if acc_state is False:
-                self.restore_state()
-            if acc_state is True or k >= self._destruction_attempts:
-                break
-                # self.neighbor_list_new = self.build_neighbor_list(self.atoms_new)
+        else:
+            if len(self.atoms_new) == 0:
+                logger.warning(self._logger_prefix() + f"No {element} atoms in the box, impossible removing atoms")
+            elif len(self.atoms_new) - 1 == self._n_min:
+                logger.warning(self._logger_prefix() + f"The system reached the min allowed  ({self._n_min})")
+            acc_state = False
+            logger.debug(self._logger_prefix() + log_second_prefix + f"Accepted={acc_state}")
+        if acc_state is False:
+            self.restore_state()
+            # if acc_state is True or k >= self.destruction_max_attempts:
+            #     break
+            # self.neighbor_list_new = self.build_neighbor_list(self.atoms_new)
         if acc_state:
             logger.info(
                 self._logger_prefix()

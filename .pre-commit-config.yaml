@@ -52,6 +52,18 @@ repos:
     hooks:
       - id: flake8
 
+  - repo: https://github.com/econchick/interrogate
+    rev: 1.7.0  # or master if you're bold
+    hooks:
+      - id: interrogate
+        pass_filenames: false  # needed if excluding files with pyproject.toml or setup.cfg
+
+  # -   repo: https://github.com/pycqa/pydocstyle
+  #     rev: 6.3.0
+  #     hooks:
+  #     -   id: pydocstyle
+  #         args: [--ignore=D107,D204]
+
   - repo: https://github.com/pre-commit/mirrors-mypy
     rev: 'v1.13.0'  # Use the sha / tag you want to point at
     hooks:

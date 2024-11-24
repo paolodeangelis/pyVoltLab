@@ -1,4 +1,5 @@
 import sys
+from pathlib import Path
 from typing import Any
 
 from loguru import logger
@@ -27,12 +28,12 @@ def logger_formatter(record: dict[str, Any]) -> str:
         )
 
 
-def configure_logger(log_level: str, log_file: str = "log.log", colorize: bool = True) -> None:
+def configure_logger(log_level: str, log_file: str | Path = "log.log", colorize: bool = True) -> None:
     """Configure the Loguru logger to log both to console and a file.
 
     Args:
         log_level (str): Logging level to set for the logger (e.g., "DEBUG", "INFO").
-        log_file (str, optional): Path to the log file. Defaults to "app.log".
+        log_file (str | Path): Path to the log file. Defaults to "app.log".
         colorize (bool, optional): Whether to enable colorized output for the console. Defaults to True.
     """
     logger.remove()  # Remove default logger
@@ -57,7 +58,7 @@ def configure_logger(log_level: str, log_file: str = "log.log", colorize: bool =
         log_file,
         level="INFO",
         format=logger_formatter,
-        rotation="10 MB",  # Rotate log file after reaching 10 MB
+        rotation="100 MB",  # Rotate log file after reaching 10 MB
         retention="10 days",  # Retain rotated logs for 10 days
-        compression="zip",  # Compress rotated log files
+        # compression="zip",  # Compress rotated log files
     )

@@ -130,3 +130,22 @@ module = [
   "devtools.*",
 ]
 follow_imports = "skip"
+
+[tool.interrogate]
+ignore-init-method = false
+ignore-init-module = true
+ignore-magic = false
+ignore-semiprivate = true
+ignore-private = true
+ignore-property-decorators = false
+ignore-module = false
+ignore-nested-functions = false
+ignore-nested-classes = false
+ignore-setters = false
+ignore-overloaded-functions = false
+fail-under = 80
+# example values
+exclude = ["setup.py", "docs", "build", "devtools", "*/_info.py", "*/_version.py"]
+style = "google"
+verbose = 2
+quiet = false

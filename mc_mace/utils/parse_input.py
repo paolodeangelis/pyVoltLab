@@ -20,7 +20,10 @@ DEFAULTS = {
         "max volume change": 0.01,
         "probabilities": {"position": 0.75, "volume": 0.25},
         "continue": False,
-        "tuning every": 10,
+        "tuning every": 100,
+        "max attempts": {"creation": 0, "destruction": 0},
+        "max atoms": 9999,
+        "min atoms": 0,
     },
     "mupt": {
         "temperature": 300.0,  # Kelvin
@@ -36,7 +39,10 @@ DEFAULTS = {
             "destruction": 0.01,
         },
         "continue": False,
-        "tuning every": 10,
+        "tuning every": 100,
+        "max attempts": {"creation": 100, "destruction": 100},
+        "max atoms": 9999,
+        "min atoms": 0,
     },
 }
 DEFAULTS_OUT = {
@@ -138,3 +144,31 @@ def parse_yaml_input(file_path: Path | str) -> dict[Any, Any]:
     except Exception as e:
         logger.error(f"Unexpected error: {e}")
         raise e
+
+
+def ignore_mc_input(mc_input: dict[Any, Any], key: list[str] | str, why: str, out: Any | None = None) -> Any:
+    if isinstance(key, str):
+        if key in mc_input:
+            if mc_input[key] is not None:
+                logger.warning(f"Input option `{key}` ignored since {why}.")
+    elif isinstance(key, list):
+        if key[1] in mc_input[key[0]]:
+            if mc_input[key[0]][key[1]] is not None:
+                logger.warning(f"Input option `{key[0]}.{key[1]}` ignored since {why}.")
+    return out
+
+
+def overwrite_mc_input(mc_input: dict[str, Any], key: list[str] | str, new_value: str) -> dict[str, Any]:
+    if isinstance(key, str):
+        if key in mc_input:
+            if mc_input[key] is not None:
+                logger.warning(f"Input option `{key}` overwrite with {mc_input[key]}->{new_value}.")
+                mc_input[key] = new_value
+    elif isinstance(key, list):
+        if key[1] in mc_input[key[0]]:
+            if mc_input[key[0]][key[1]] is not None:
+                logger.warning(
+                    f"Input option `{key[0]}.{key[1]}` overwrite with {mc_input[key[0]][key[1]]}->{new_value}."
+                )
+                mc_input[key[0]][key[1]] = new_value
+    return mc_input
