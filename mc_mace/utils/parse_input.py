@@ -5,7 +5,7 @@ import yaml
 from loguru import logger
 from scipy.constants import elementary_charge
 
-OUT_FILE_KEY = ["trajectory", "thermo", "events"]
+OUT_FILE_KEY = ["trajectory", "thermo", "events", "voltage", "convex hull"]
 OUT_FOLDER_KEY = ["states folder"]
 
 # Define default values for optional parameters
@@ -24,6 +24,13 @@ DEFAULTS = {
         "max attempts": {"creation": 0, "destruction": 0},
         "max atoms": 9999,
         "min atoms": 0,
+        "output files": {
+            "thermo": "MC/thermo.csv",
+            "trajectory": "MC/trj.xyz",
+            "events": "MC/events.csv",
+            "restart": "MC/restart.xyz",
+        },
+        "states folder": "states",
     },
     "mupt": {
         "temperature": 300.0,  # Kelvin
@@ -43,6 +50,13 @@ DEFAULTS = {
         "max attempts": {"creation": 100, "destruction": 100},
         "max atoms": 9999,
         "min atoms": 0,
+        "output files": {
+            "thermo": "MC/thermo.csv",
+            "trajectory": "MC/trj.xyz",
+            "events": "MC/events.csv",
+            "restart": "MC/restart.xyz",
+        },
+        "states folder": "states",
     },
 }
 DEFAULTS_OUT = {

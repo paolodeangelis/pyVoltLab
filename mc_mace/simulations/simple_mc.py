@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from loguru import logger
+
 from mc_mace.ensembles import NPT, muPT
 from mc_mace.utils.io import save_dict_to_yaml
 
@@ -49,6 +51,7 @@ class Simulation(BaseSimulation):
         elif self.sim_settings["ensemble"].lower() == "mupt":  # type: ignore[index]
             self.ensemble = muPT(**ensemble_settings)  # type: ignore[assignment]
         else:
+            logger.error("Unsupported ensemble type")
             raise ValueError("Unsupported ensemble type")
         save_dict_to_yaml(self.sim_settings, "full_simulation_settings.yaml")  # type: ignore[arg-type]
         self.ensemble.run()  # type: ignore[attr-defined]

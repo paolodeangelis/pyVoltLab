@@ -5,7 +5,7 @@ from typing import Annotated
 
 import typer
 
-from mc_mace.simulations import PIDTuning, Simulation
+from mc_mace.simulations import PIDTuning, Simulation, VoltageProfile
 
 app = typer.Typer(help="Monte Carlo simulation with MACE CLI.")
 
@@ -39,7 +39,7 @@ def run(
 
 
 @app.command(help="Perform dynamic PID tuning for chemical potential during an MC simulation.")  # type: ignore[misc]
-def chem_pid(
+def pid(
     input_mc_file: Annotated[Path, typer.Argument(help="YAML input MC step file")],
     input_pid_file: Annotated[Path, typer.Argument(help="YAML input PID tuning file")],
     device: Annotated[str, typer.Option(help="Device for potential energy calculation (cuda, cpu)")] = "cuda",
@@ -67,6 +67,34 @@ def chem_pid(
     simulation = PIDTuning(
         input_mc_file, pid_file=input_pid_file, log_file=log_file, log_level=log_level, colorize=colorize, device=device
     )
+    simulation.run()
+
+
+@app.command(help="Perform 0-K intercalation voltage curves simulation.")  # type: ignore[misc]
+def zeroK_voltage(
+    input_file: Annotated[Path, typer.Argument(help="YAML input file")],
+    device: Annotated[str, typer.Option(help="Device for potential energy calculation (cuda, cpu)")] = "cuda",
+    log_level: Annotated[str, typer.Option(help="Logger level (DEBUG, INFO, WARNING, ERROR)")] = "INFO",
+    log_file: Annotated[str, typer.Option(help="Log file path")] = "simulation.log",
+    colorize: Annotated[bool, typer.Option(help="Colorize colors")] = True,
+) -> None:
+    """
+    Perform 0-K intercalation voltage curves simulation.
+
+    This command adjusts the chemical potential dynamically using a PID controller during a Monte Carlo simulation.
+    The simulation is configured using two YAML files: one for the MC settings and another for PID tuning parameters.
+
+    Example:
+        python script.py chem-pid mc_input.yaml pid_input.yaml --device cuda --log-level DEBUG
+
+    Args:
+        input_file (Path): Path to the YAML file containing simulation parameters.
+        device (str): Computational device to use ('cuda' for GPU or 'cpu').
+        log_level (str): Logging verbosity level (default: INFO).
+        log_file (str): Path to the log file (default: simulation.log).
+        colorize (bool): Whether to colorize log output (default: True).
+    """
+    simulation = VoltageProfile(input_file, log_file=log_file, log_level=log_level, colorize=colorize, device=device)
     simulation.run()
 
 

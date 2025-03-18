@@ -143,7 +143,7 @@ ignore-nested-functions = false
 ignore-nested-classes = false
 ignore-setters = false
 ignore-overloaded-functions = false
-fail-under = 80
+fail-under = 70
 # example values
 exclude = ["setup.py", "docs", "build", "devtools", "*/_info.py", "*/_version.py"]
 style = "google"

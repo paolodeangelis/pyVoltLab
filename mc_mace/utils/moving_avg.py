@@ -123,6 +123,7 @@ class ForgetfulMovingAvg:
         Returns:
             float: The variance of the samples in the current window.
         """
+        self._M2 = abs(self._M2)
         self._var = float(self._M2 / self._L)
         return self._var
 
@@ -166,3 +167,91 @@ class ForgetfulMovingAvg:
             int: The number of samples currently in the window.
         """
         return self._get_window_size()
+
+
+class MovingAvg:
+    """
+    A class to maintain a moving average and variance over a fixed window of samples.
+
+    Attributes:
+        window (int): The size of the moving window.
+        buffer (deque): A deque to store the most recent samples.
+
+    Notes:
+        Time complexity: O(w^0.16) (w: window)
+        Memory complexity: O(w^0.83) (w: window)
+    """
+
+    def __init__(self, window: int, dropout: float = 1.0) -> None:
+        """
+        Initialize the MovingAvg with a specified window size.
+
+        Args:
+            window (int): The number of samples to include in the moving window.
+        """
+        if window <= 0:
+            raise ValueError("Window size must be greater than zero.")
+        self.window = window
+        self.buffer = deque([np.nan] * window, maxlen=window)
+
+    def add_sample(self, new_sample: float) -> None:
+        """
+        Add a new sample to the buffer.
+
+        Args:
+            new_sample (float): The new data point to add to the moving average.
+        """
+        self.buffer.append(new_sample)
+
+    def _get_valid(self) -> np.ndarray:
+        return np.array(self.buffer, dtype=np.float64)
+
+    def get_mean(self) -> float:
+        """
+        Compute the mean of the current buffer, ignoring NaN values.
+
+        Returns:
+            float: The mean of the samples in the buffer. Returns None if no valid samples exist.
+        """
+        valid_samples = self._get_valid()
+        if np.all(np.isnan(valid_samples)):
+            return 0.0
+        return float(np.nanmean(valid_samples))
+
+    def get_variance(self) -> float:
+        """
+        Compute the variance of the current buffer, ignoring NaN values.
+
+        Returns:
+            float: The variance of the samples in the buffer. Returns None if no valid samples exist.
+        """
+        valid_samples = self._get_valid()
+        if np.all(np.isnan(valid_samples)):
+            return 0.0
+        return float(np.nanvar(valid_samples))
+
+    def reset(self) -> None:
+        """
+        Reset the buffer to its initial state, filled with NaN values.
+        """
+        self.buffer = deque([np.nan] * self.window, maxlen=self.window)
+
+    def get_buffer(self) -> list[float]:
+        """
+        Get a list of the current buffer contents.
+
+        Returns:
+            list[float]: The contents of the buffer as a list.
+        """
+        return list(self.buffer)
+
+    def get_last(self) -> float:
+        """
+        Get the most recently added sample.
+
+        Returns:
+            float: The last added sample, or None if the buffer contains only NaN values.
+        """
+        if np.isnan(self.buffer[-1]):
+            return 0.0
+        return float(self.buffer[-1])

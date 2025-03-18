@@ -653,7 +653,10 @@ class MC:
         # for index in atoms_candidates:
         if len(self.atoms_new) >= 1:
             while (
-                k < self.destruction_max_attempts and acc_state is False and len(self.atoms_new) - 1 > self._n_min
+                k < self.destruction_max_attempts
+                and acc_state is False
+                and len(self.atoms_new) - 1 > self._n_min
+                and len(atoms_candidates) != 0
             ):  # and k <= Ne:
                 index = atoms_candidates[k]
                 k += 1

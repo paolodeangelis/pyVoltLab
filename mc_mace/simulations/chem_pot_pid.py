@@ -12,7 +12,7 @@ from mc_mace.utils.io import (
     create_file_with_backup,
     save_dict_to_yaml,
 )
-from mc_mace.utils.moving_avg import ForgetfulMovingAvg
+from mc_mace.utils.moving_avg import ForgetfulMovingAvg, MovingAvg
 from mc_mace.utils.parse_input import ignore_mc_input, overwrite_mc_input
 from mc_mace.utils.parse_pid_input import parse_yaml_pid_input
 
@@ -76,10 +76,10 @@ class PIDTuning(Simulation):
         self.k_fluc: float | None = None
         self.k_min: float | None = None
         self.k_max: float | None = None
-        self.early_stop_start: int = 1000
-        self.early_stop_dropout: int
-        self.early_stop_n: ForgetfulMovingAvg | None = None
-        self.early_stop_mu: ForgetfulMovingAvg | None = None
+        self.early_stop_window: int = 1000
+        self.early_stop_start: int = max(1000, self.early_stop_window)
+        self.early_stop_n: MovingAvg | None = None
+        self.early_stop_mu: MovingAvg | None = None
 
     def initialize(self) -> None:
         """
@@ -148,11 +148,25 @@ class PIDTuning(Simulation):
         self.element = elements[0]
         return elements, potentials
 
+    def _remove_extra_atoms(self) -> None:
+        Nstart = len(np.where(self.system.get_atomic_numbers() == atomic_numbers[self.element])[0])
+        if Nstart - self.n_target > 0:
+            logger.warning(f"Starting configuration have MORE atoms that target ({Nstart} > {self.n_target})")
+            logger.warning(f"{Nstart -self.n_target} {self.element} atoms are going to be removed")
+            temp = self.system.copy()
+            i_element = np.where(temp.get_atomic_numbers() == atomic_numbers[self.element])[0]
+            i_e_to_remove = np.random.choice(i_element, size=int(Nstart - self.n_target), replace=False)
+            del temp[i_e_to_remove]
+            self.system = temp.copy()
+        elif Nstart - self.n_target < 0:
+            logger.warning(f"Starting configuration have LESS atoms that target ({Nstart} < {self.n_target})")
+
     def warmup(self) -> None:
         """
         Prepare the simulation and configure the ensemble for PID tuning.
         """
         self.initialize()
+        self._remove_extra_atoms()
         self._set_engine()
         ensemble_settings = self._get_ensemble_settings()
         if self.sim_settings["ensemble"].lower() == "npt":  # type: ignore[index]
@@ -168,15 +182,15 @@ class PIDTuning(Simulation):
     def _early_stop_setup(self) -> None:
         if "early stop" in self.pid_settings:  # type: ignore[operator]
             early_stop_dict = self.pid_settings["early stop"]  # type: ignore[index]
-            self.early_stop_dropout = early_stop_dict["dropout"]
+            self.early_stop_window = early_stop_dict["window"]
             if early_stop_dict["target atoms mean"] is not False:
                 logger.debug("PID early stop `target atoms mean`: ON")
-                self.early_stop_n = ForgetfulMovingAvg(dropout=self.early_stop_dropout)
+                self.early_stop_n = MovingAvg(window=self.early_stop_window)
             if early_stop_dict["target atoms variance"] is not False:
                 logger.debug("PID early stop `target atoms variance`: ON")
             if early_stop_dict["chemical potential variance"] is not False:
                 logger.debug("PID early stop `chemical potential variance`: ON")
-                self.early_stop_mu = ForgetfulMovingAvg(dropout=self.early_stop_dropout)
+                self.early_stop_mu = MovingAvg(window=self.early_stop_window)
         else:
             logger.warning("PID early stop not used!")
 
@@ -205,6 +219,8 @@ class PIDTuning(Simulation):
                 "N",
                 "N_mean",
                 "N_var",
+                "N-N_target",
+                "N_mean-N_target",
                 "k",
                 "k_mean",
                 "k_var",
@@ -232,6 +248,7 @@ class PIDTuning(Simulation):
                     f"{self.ensemble._i_step:10d}, {self._t:10d}, "  # type: ignore[attr-defined]
                     f"{self.mu_t.get_last():15.8e}, {self.mu_t.get_mean():15.8e}, {self.mu_t.get_variance():15.8e}, "  # type: ignore[union-attr]
                     f"{self.n_t.get_last():15.8e}, {self.n_t.get_mean():15.8e}, {self.n_t.get_variance():15.8e}, "  # type: ignore[union-attr]
+                    f"{self.n_t.get_last() - self.n_target :15.8e}, {self.n_t.get_mean() - self.n_target :15.8e}, "  # type: ignore[union-attr]
                     f"{self.k_t.get_last():15.8e}, {self.k_t.get_mean():15.8e}, {self.k_t.get_variance():15.8e},"  # type: ignore[union-attr]
                     f"{self.k_fluc:15.8e}, {self.k_min:15.8e}, {self.k_max:15.8e}"
                 ),
@@ -249,44 +266,44 @@ class PIDTuning(Simulation):
             logger.debug(self.__logger_prefix() + " PID Early Stop check ".center(120, " "))
             if early_stop_dict["target atoms mean"] is not False:
                 checks.append(
-                    abs(self.early_stop_n.get_mean() - self.n_target) < float(early_stop_dict["target atoms mean"]) and (abs(self.early_stop_n.get_mean() - self.n_target) > 1e-20)  # type: ignore[union-attr, operator]
+                    abs(self.early_stop_n.get_mean() - self.n_target) < float(early_stop_dict["target atoms mean"])  # type: ignore[union-attr, operator]
                 )
                 logger.debug(
                     self.__logger_prefix()
                     + (
                         f" * target atoms mean = {checks[-1]} "
-                        f"(<N> - N_0 = {abs(self.early_stop_n.get_mean() - self.n_target):.3f}) "  # type: ignore[union-attr, operator]
-                        f"< {float(early_stop_dict['target atoms mean']):1.3e})"
+                        f"( |<N> - N_0| = {abs(self.early_stop_n.get_mean() - self.n_target):.3f} "  # type: ignore[union-attr, operator]
+                        f"< {float(early_stop_dict['target atoms mean']):1.3e} )"
                     )
-                    .ljust(60, " ")
+                    .ljust(90, " ")
                     .center(120, " ")
                 )
             if early_stop_dict["target atoms variance"] is not False:
                 checks.append(
-                    abs(self.early_stop_n.get_variance()) < float(early_stop_dict["target atoms variance"]) and abs(self.early_stop_n.get_variance()) > 1e-20  # type: ignore[union-attr]
+                    abs(self.early_stop_n.get_variance()) < float(early_stop_dict["target atoms variance"]) and abs(self.early_stop_n.get_variance()) > 1e-80  # type: ignore[union-attr]
                 )
                 logger.debug(
                     self.__logger_prefix()
                     + (
                         f" * target atoms variance = {checks[-1]} "
-                        f"(<N^2> = {self.early_stop_n.get_variance():.3e} "  # type: ignore[union-attr]
-                        f"< {float(early_stop_dict['target atoms variance']):1.3e})"
+                        f"( <N^2> = {self.early_stop_n.get_variance():.3e} "  # type: ignore[union-attr]
+                        f"< {float(early_stop_dict['target atoms variance']):1.3e} )"
                     )
-                    .ljust(60, " ")
+                    .ljust(90, " ")
                     .center(120, " ")
                 )
             if early_stop_dict["chemical potential variance"] is not False:
                 checks.append(
-                    abs(self.early_stop_mu.get_variance()) < float(early_stop_dict["chemical potential variance"]) and abs(self.early_stop_mu.get_variance()) > 1e-20  # type: ignore[union-attr]
+                    abs(self.early_stop_mu.get_variance()) < float(early_stop_dict["chemical potential variance"]) and abs(self.early_stop_mu.get_variance()) > 1e-80  # type: ignore[union-attr]
                 )
                 logger.debug(
                     self.__logger_prefix()
                     + (
                         f" * chemical potential variance = {checks[-1]} "
-                        f"(<μ^2> = {self.early_stop_mu.get_variance():.3e} "  # type: ignore[union-attr]
-                        f"< {float(early_stop_dict['chemical potential variance']):1.3e})"
+                        f"( <μ^2> = {self.early_stop_mu.get_variance():.3e} "  # type: ignore[union-attr]
+                        f"< {float(early_stop_dict['chemical potential variance']):1.3e} )"
                     )
-                    .ljust(60, " ")
+                    .ljust(90, " ")
                     .center(120, " ")
                 )
             early_stop = np.all(checks)
@@ -299,19 +316,23 @@ class PIDTuning(Simulation):
         self.warmup()
         self.pid_initialize()
         while self.ensemble._i_step < self.ensemble.steps:  # type: ignore[attr-defined]
+            # for i in range(self.mc_steps):
+            # MC
+            accepted = self.ensemble.mc_step()  # type: ignore[attr-defined]
+
+            if accepted:
+                self.ensemble.success()  # type: ignore[attr-defined]
+            else:
+                self.ensemble.fail()  # type: ignore[attr-defined]
+            self.ensemble.print_step_frequencies()  # type: ignore[attr-defined]
+
+            if self.ensemble.tunning_step is not None:  # type: ignore[attr-defined]
+                self.ensemble.tuning()  # type: ignore[attr-defined]
+            self.ensemble._i_step += 1  # type: ignore[attr-defined]
+            # PID
+            if self.ensemble._move_type not in ["creation", "destruction"]:  # type: ignore[attr-defined]
+                continue
             logger.info(f" PID step {self._t:d} ".center(15, " ").center(120, "+"))
-            for i in range(self.mc_steps):
-                accepted = self.ensemble.mc_step()  # type: ignore[attr-defined]
-
-                if accepted:
-                    self.ensemble.success()  # type: ignore[attr-defined]
-                else:
-                    self.ensemble.fail()  # type: ignore[attr-defined]
-                self.ensemble.print_step_frequencies()  # type: ignore[attr-defined]
-
-                if self.ensemble.tunning_step is not None:  # type: ignore[attr-defined]
-                    self.ensemble.tuning()  # type: ignore[attr-defined]
-                self.ensemble._i_step += 1  # type: ignore[attr-defined]
             atoms = self.ensemble.engine.get_state_configuration()  # type: ignore[attr-defined]
             self.n_t.add_sample(len(np.where(atoms.get_atomic_numbers() == atomic_numbers[self.element])[0]))  # type: ignore[union-attr]
             self.mu_t.add_sample(self.ensemble.engine.mus[0])  # type: ignore[attr-defined,union-attr]

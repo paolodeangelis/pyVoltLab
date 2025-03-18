@@ -166,3 +166,5 @@ mc_mace-*.whl
 *.whl
 .reference/
 .test*
+.*.ipynb
+build_all.sh

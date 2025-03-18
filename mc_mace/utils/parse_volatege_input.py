@@ -6,25 +6,25 @@ from loguru import logger
 
 # Define default values for optional parameters
 DEFAULTS = {
-    "n target": "from input",
-    "MC steps": 10,
-    "dropout": 0.5,
-    "output file": "chem_potential.csv",
-    "saving step": 10,
-    "bonds": 10,
-    "early stop": {
-        "dropout": 0.25,
-        "target atoms mean": False,
-        "target atoms variance": False,
-        "chemical potential variance": False,
+    "optimizer": {
+        "type": "FIRE2",
+        "fmax": 0.05,
+        "max steps": 10000,
     },
+    "output files": {
+        "thermo": "thermo.csv",
+        "trajectory": "trj.xyz",
+        "voltage": "voltage.csv",
+        "convex hull": "convexhull.csv",
+    },
+    "states folder": "states",
 }
 
 # List of required parameters
-REQUIRED_ENTRIES = ["system", "compressibility scale", "chemical potential", "n target", "mace_model"]
+REQUIRED_ENTRIES = ["system", "working ion", "mace_model"]
 
 
-def parse_yaml_pid_input(file_path: Path | str) -> dict[Any, Any]:
+def parse_yaml_voltage_input(file_path: Path | str) -> dict[Any, Any]:
     """
     #TODO
     Parse a YAML input file, validate required parameters, and assign defaults

@@ -153,6 +153,9 @@ class BaseSimulation(ABC):
         self.calculator: Calculator | Any = None
         self.engine: MC | None = None
 
+    def _load_settings(self) -> None:
+        self.sim_settings = parse_yaml_input(self.input_file)
+
     def initialize(self) -> None:
         """
         Initialize the simulation.
@@ -165,7 +168,7 @@ class BaseSimulation(ABC):
         with open(self.log_file, "a") as f_:
             print_header(f_)
         configure_logger(self.log_level.upper(), colorize=self.colorize, log_file=self.log_file)
-        self.sim_settings = parse_yaml_input(self.input_file)
+        self._load_settings()
         create_out_files(self.sim_settings)
         create_out_folders(self.sim_settings)
         self._load_system()
