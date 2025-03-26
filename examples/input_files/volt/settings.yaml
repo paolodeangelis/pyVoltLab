@@ -1,0 +1,16 @@
+system: data/LiCoO2_sc2.cif
+mace_model: ./data/mace_agnesi_medium.model
+optimizer:
+  type: FIRE2
+  fmax: 0.05
+  max steps: 1000
+output files:
+  thermo: VP/thermo.csv
+  trajectory: VP/trj.xyz
+  convex hull: VP/hull.csv
+  voltage: VP/voltage.csv
+states folder: VP/states
+working ion:
+  charge carried: 1
+  chemical potential:
+    Li: data/Li_sc.cif

@@ -1,0 +1,10 @@
+n target: from input
+MC steps: 10
+window: 5000
+dropout: 0.5
+n target: "from input"
+compressibility scale: 50.0
+output file: chem_potential.csv
+saving step: 5
+chemical potential:
+  Li: -1.8

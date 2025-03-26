@@ -1,0 +1,31 @@
+ensemble: muPT
+steps: 500
+temperature: 300.0
+pressure: 6.241509074460763e-07
+mace_model: ./data/mace_agnesi_medium.model
+system: ./EQ/restart.xyz
+output files:
+  thermo: MC/thermo.csv
+  trajectory: MC/trj.xyz
+  events: MC/events.csv
+  restart: MC/restart.xyz
+saving step:
+  thermo: 100
+  trajectory: 50
+  events: 100
+  states: 1
+  restart: 50
+states folder: MC/states
+probabilities:
+  position: 0.70
+  volume: 0.25
+  creation: 0.015
+  destruction: 0.035
+tuning every: 100
+continue: true
+cutoff: 5.0
+chemical potential:
+  Li: data/Li.cif
+seed: null
+max displacement: 0.175
+max volume change: 0.01

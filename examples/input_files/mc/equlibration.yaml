@@ -1,0 +1,28 @@
+ensemble: NPT
+steps: 500
+temperature: 300.0
+pressure: 6.241509074460763e-07
+mace_model: ./data/Li-Pb.eam.alloy
+system: ./data/Li17Pb4_empty.cif
+output files:
+  thermo: EQ/thermo.csv
+  trajectory: EQ/trj.xyz
+  events: EQ/events.csv
+  restart: EQ/restart.xyz
+saving step:
+  thermo: 100
+  trajectory: 50
+  events: 100
+  states: 1
+  restart: 50
+states folder: EQ/states
+probabilities:
+  position: 0.5
+  volume: 0.5
+tuning every: 100
+continue: true
+cutoff: 5.0
+chemical potential: {}
+seed: null
+max displacement: 0.175
+max volume change: 0.01
