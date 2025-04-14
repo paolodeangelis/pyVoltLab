@@ -56,7 +56,7 @@ def configure_logger(log_level: str, log_file: str | Path = "log.log", colorize:
     # Add file logging
     logger.add(
         log_file,
-        level="INFO",
+        level=log_level.upper(),
         format=logger_formatter,
         rotation="100 MB",  # Rotate log file after reaching 10 MB
         retention="10 days",  # Retain rotated logs for 10 days

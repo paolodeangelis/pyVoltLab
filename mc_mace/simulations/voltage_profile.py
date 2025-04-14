@@ -1,21 +1,25 @@
 import glob
 import os
+import shutil
+import warnings
 from io import StringIO
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 from ase import Atoms
+from ase.calculators.espresso import Espresso, EspressoProfile
 from ase.data import atomic_numbers
 from ase.filters import ExpCellFilter, FrechetCellFilter, UnitCellFilter  # noqa: F401
 from ase.formula import Formula
 from ase.io import read, write
 from ase.optimize import BFGS, FIRE, FIRE2, LBFGS, BFGSLineSearch, GPMin, MDMin
 from loguru import logger
+from mace.calculators import MACECalculator
 from scipy.spatial import ConvexHull
 
 from mc_mace.utils.io import append_line_to_file, clean_ase_read, save_dict_to_yaml
-from mc_mace.utils.parse_volatege_input import parse_yaml_voltage_input
+from mc_mace.utils.parse import parse_yaml_voltage_input
 from mc_mace.utils.profiler import MethodProfiler
 
 from .simulation_abc import BaseSimulation
@@ -49,6 +53,23 @@ class VoltageCalculator:
             self._state_energy[formula] = data["energy"].values
 
     def get_extremes(self):
+        """
+        Identify the states with the maximum and minimum number of ions.
+
+        This method iterates through the energy states and determines:
+        - The state with the maximum number of working ions (`_formula_full`).
+        - The state with the minimum number of working ions (`_formula_empty`).
+
+        Raises:
+            ValueError: If multiple energy values are found for the same state.
+
+        Attributes Updated:
+            - _formula_full: The formula of the state with the maximum working ions.
+            - _formula_empty: The formula of the state with the minimum working ions.
+            - _energy_full: Energy of the state with the maximum working ions.
+            - _energy_empty: Energy of the state with the minimum working ions.
+            - _n_ion_max: Maximum number of working ions in any state.
+        """
         n_min = float("inf")
         n_max = 0
         for formula_, energy in self._state_energy.items():
@@ -64,7 +85,7 @@ class VoltageCalculator:
                 self._formula_empty = formula_
                 n_min = n_ion
         if len(self._state_energy[self._formula_full]) > 1:
-            print("Too many energy in empty full")
+            print("Too many energy in full state")
             print(self._state_energy[self._formula_full])
         self._energy_full = self._state_energy[self._formula_full]
         self._n_ion_max = n_max
@@ -129,7 +150,7 @@ class VoltageCalculator:
 
 class VoltageProfile(BaseSimulation):
     """
-    Subclass to compute the voltage profile of a system at 0K using MACE force fields.
+    Subclass to compute the voltage profile of a system at 0K using MACE force fields or Quantum espresso DFT.
 
     This subclass removes atoms iteratively and optimizes the structure to compute energy changes.
     """
@@ -142,7 +163,7 @@ class VoltageProfile(BaseSimulation):
         self.state_0: Atoms
         self.state_1: Atoms
         self._i_state: int
-        self._ai: int
+        self._ai: int  # removed atom id
         self.n_states: int
         self._converged: bool
         self.save_trj_step: int
@@ -177,9 +198,97 @@ class VoltageProfile(BaseSimulation):
     def _get_ensemble_settings(self) -> None:
         pass
 
+    # Add new methods
+    def _pw_input_file(self):
+        """
+        Extract quantum espresso input parameters to be provided to the espress calculator.
+        """
+        self.sim_settings["pw_input"] = {
+            "calculation": self.sim_settings["calculation"],
+            "restart_mode": self.sim_settings["restart_mode"],
+            "verbosity": self.sim_settings["verbosity"],
+            "outdir": self.sim_settings["outdir"],
+            "prefix": self.sim_settings["prefix"],
+            "max_seconds": self.sim_settings["max_seconds"],
+            "tstress": self.sim_settings["tstress"],
+            "tprnfor": self.sim_settings["tprnfor"],
+            "etot_conv_thr": self.sim_settings["etot_conv_thr"],
+            "forc_conv_thr": self.sim_settings["forc_conv_thr"],
+            "input_dft": self.sim_settings["input_dft"],
+            "occupations": self.sim_settings["occupations"],
+            "degauss": self.sim_settings["degauss"],
+            "smearing": self.sim_settings["smearing"],
+            "conv_thr": self.sim_settings["conv_thr"],
+            "mixing_mode": self.sim_settings["mixing_mode"],
+            "mixing_beta": self.sim_settings["mixing_beta"],
+            "diagonalization": self.sim_settings["diagonalization"],
+            "startingwfc": self.sim_settings["startingwfc"],
+            "ecutwfc": self.sim_settings["ecutwfc"],
+            "ecutrho": self.sim_settings["ecutrho"],
+        }
+        logger.info("Quantum espresso input file espresso.pwi created successfully.")
+
+    def _get_profile(self) -> EspressoProfile:
+        """
+        Specify the path to the pw.x executable and the pseudopotential directory.
+        """
+        command = self.sim_settings["command"]
+        pseudo_dir = self.sim_settings["pseudo_dir"]
+
+        return EspressoProfile(
+            command=command,
+            pseudo_dir=pseudo_dir,
+        )
+
+    def copy_pw_io(self, start: bool = False) -> None:
+        """
+        Copy the input and output files for quantum espresso.
+        """
+        if self.sim_settings.get("calculation") == "scf":
+            input_file = "espresso.pwi"
+            output_file = "espresso.pwo"
+            target_dir = self.sim_settings["states folder"] + "/" + self.state_1.get_chemical_formula()
+            os.makedirs(target_dir, exist_ok=True)
+            if start:
+                logger.debug(
+                    f"saving a copy of the  starting (before optimization) {input_file} and {output_file} files in {target_dir}"
+                )
+                shutil.copy(input_file, target_dir + "/" + self.state_1.get_chemical_formula() + "-start-" + input_file)
+                shutil.copy(
+                    output_file, target_dir + "/" + self.state_1.get_chemical_formula() + "-start-" + output_file
+                )
+            else:
+                logger.debug(
+                    f"saving a copy of the final (after optimization) {input_file} and {output_file} files in {target_dir}"
+                )
+                shutil.copy(input_file, target_dir + "/" + self.state_1.get_chemical_formula() + "-end-" + input_file)
+                shutil.copy(output_file, target_dir + "/" + self.state_1.get_chemical_formula() + "-end-" + output_file)
+        else:
+            pass
+
     # Change Abstract methods
     def _load_system(self) -> None:
         self.system = clean_ase_read(self.sim_settings["system"])  # type: ignore[index]
+
+    # Change Abstract methods
+    def _set_calculator(self) -> None:
+        if "mace_model" in self.sim_settings:
+            with warnings.catch_warnings():
+                logger.debug("Loading MACE model")
+
+                self.calculator = MACECalculator(model_paths=self.sim_settings["mace_model"], device=self.device)  # type: ignore[index]
+
+        elif "calculation" in self.sim_settings:
+            logger.debug("Loading Quantum espresso calculator")
+            self._pw_input_file()  # to get self.sim_settings["pw_input"]
+
+            self.calculator = Espresso(
+                input_data=self.sim_settings["pw_input"],
+                profile=self._get_profile(),
+                pseudopotentials=self.sim_settings["pseudopotentials"],
+                kpts=self.sim_settings["kpts"],
+                koffset=self.sim_settings["koffset"],
+            )
 
     def _compute_chemical_potentials(self) -> tuple[list[str], list[float]]:
         """
@@ -336,7 +445,7 @@ class VoltageProfile(BaseSimulation):
             energy = self._get_potetial_energy_new_state()
             volume = self.state_1.get_volume()
             formula = atoms.get_chemical_formula(mode="hill", empirical=False)
-            files = glob.glob(os.path.join(str(self.out_state_folder), f"*{formula}.csv"))
+            files = glob.glob(os.path.join(str(self.out_state_folder), f"*-{formula}.csv"))
             if len(files) < 1:
                 id = len(glob.glob(os.path.join(str(self.out_state_folder), "*.csv")))
                 file_path = os.path.join(str(self.out_state_folder), f"{id:03d}-{formula}.csv")
@@ -426,11 +535,14 @@ class VoltageProfile(BaseSimulation):
             )
             self.state_1.calc = self.calculator
             energy_start = self._get_potetial_energy_new_state()
+            self.copy_pw_io(start=True)
+            logger.debug(f"optimizing system {self.state_1.get_chemical_formula()}")
             force_max_start = np.max(np.linalg.norm(self.state_1.get_forces(), axis=1))
             cell_start = self.state_1.cell.cellpar()
             vol_start = self.state_1.cell.volume
             self.state_1 = self._optimize_system(self.state_1)
             energy_end = self._get_potetial_energy_new_state()
+            self.copy_pw_io(start=False)
             force_max_end = np.max(np.linalg.norm(self.state_1.get_forces(), axis=1))
             cell_end = self.state_1.cell.cellpar()
             vol_end = self.state_1.cell.volume
@@ -574,11 +686,14 @@ class VoltageProfile(BaseSimulation):
                 )
                 self.state_1.calc = self.calculator
                 energy_start = self._get_potetial_energy_new_state()
+                self.copy_pw_io(start=True)
                 force_max_start = np.max(np.linalg.norm(self.state_1.get_forces(), axis=1))
                 cell_start = self.state_1.cell.cellpar()
                 vol_start = self.state_1.cell.volume
+                logger.debug(f"optimizing system {self.state_1.get_chemical_formula()}")
                 self.state_1 = self._optimize_system(self.state_1)
                 energy_end = self._get_potetial_energy_new_state()
+                self.copy_pw_io(start=False)
                 force_max_end = np.max(np.linalg.norm(self.state_1.get_forces(), axis=1))
                 cell_end = self.state_1.cell.cellpar()
                 vol_end = self.state_1.cell.volume
@@ -589,7 +704,8 @@ class VoltageProfile(BaseSimulation):
                 logger.info(self.__logger_prefix() + f"Cell lengths [a, b, c] {cell_start[:3]} A -> {cell_end[:3]} A")
                 logger.info(self.__logger_prefix() + f"Cell angles [α,β,γ] {cell_start[3:]} ° -> {cell_end[3:]} °")
                 logger.info(self.__logger_prefix() + f"Cell volume {vol_start:.3f} A^3 -> {vol_end:.3f} A^3")
-                self._energy_store_thermo.append(self._get_potetial_energy_new_state())
+                # self._energy_store_thermo.append(self._get_potetial_energy_new_state())
+                self._energy_store_thermo.append(energy_end)
                 self.save_state()
                 # self._ai = -1
                 # self.state_1 = self.system.copy()
