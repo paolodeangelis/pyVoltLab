@@ -62,7 +62,16 @@ DEFAULTS_DFT = {
 }
 
 # List of required parameters
-REQUIRED_ENTRIES_DFT = ["working ion", "system", "ecutwfc", "ecutrho", "pseudo_dir", "command", "pseudo_dir", "kpts"]
+REQUIRED_ENTRIES_DFT = [
+    "working ion",
+    "system",
+    "ecutwfc",
+    "ecutrho",
+    "pseudopotentials",
+    "command",
+    "pseudo_dir",
+    "kpts",
+]
 
 
 def parse_yaml_voltage_input(file_path: Path | str) -> dict[Any, Any]:
@@ -96,11 +105,17 @@ def parse_yaml_voltage_input(file_path: Path | str) -> dict[Any, Any]:
         logger.error(f"Unexpected error: {e}")
         raise e
     if "mace_model" in config:
+        logger.debug("Detected MACE calculator.")
         REQUIRED_ENTRIES = REQUIRED_ENTRIES_MACE
         DEFAULTS = DEFAULTS_MACE
-    else:
+    elif "pseudopotentials" in config:
+        logger.debug("Detected SCF Espresso calculator.")
         REQUIRED_ENTRIES = REQUIRED_ENTRIES_DFT
         DEFAULTS = DEFAULTS_DFT
+    else:
+        raise ValueError(
+            "Only the MACE and SCF Espresso calculators are supported. Please verify your input file and ensure that all required parameters for the selected calculator are correctly provided."
+        )
 
     # Check for required entries
     missing_entries = [entry for entry in REQUIRED_ENTRIES if entry not in config]

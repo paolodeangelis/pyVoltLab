@@ -204,7 +204,7 @@ class VoltageProfile(BaseSimulation):
         Extract quantum espresso input parameters to be provided to the espress calculator.
         """
         self.sim_settings["pw_input"] = {
-            "calculation": self.sim_settings["calculation"],
+            "calculation": "scf",  # self.sim_settings["calculation"],
             "restart_mode": self.sim_settings["restart_mode"],
             "verbosity": self.sim_settings["verbosity"],
             "outdir": self.sim_settings["outdir"],
