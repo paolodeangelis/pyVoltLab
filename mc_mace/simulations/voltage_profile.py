@@ -219,6 +219,7 @@ class VoltageProfile(BaseSimulation):
             "degauss": self.sim_settings["degauss"],
             "smearing": self.sim_settings["smearing"],
             "conv_thr": self.sim_settings["conv_thr"],
+            "electron_maxstep": self.sim_settings["electron_maxstep"],
             "mixing_mode": self.sim_settings["mixing_mode"],
             "mixing_beta": self.sim_settings["mixing_beta"],
             "diagonalization": self.sim_settings["diagonalization"],
@@ -250,19 +251,19 @@ class VoltageProfile(BaseSimulation):
             target_dir = self.sim_settings["states folder"] + "/" + self.state_1.get_chemical_formula()
             os.makedirs(target_dir, exist_ok=True)
             if start:
+                cp_file = target_dir + "/" + self.state_1.get_chemical_formula() + "-start-" + str(self._ai) + "-"
                 logger.debug(
-                    f"saving a copy of the  starting (before optimization) {input_file} and {output_file} files in {target_dir}"
+                    f"saving the  starting {input_file} and {output_file} files before optimization to {target_dir}/{cp_file}{input_file} and {target_dir}/{cp_file}{output_file}"
                 )
-                shutil.copy(input_file, target_dir + "/" + self.state_1.get_chemical_formula() + "-start-" + input_file)
-                shutil.copy(
-                    output_file, target_dir + "/" + self.state_1.get_chemical_formula() + "-start-" + output_file
-                )
+                shutil.copy(input_file, cp_file + input_file)
+                shutil.copy(output_file, cp_file + output_file)
             else:
+                cp_file = target_dir + "/" + self.state_1.get_chemical_formula() + "-end-" + str(self._ai) + "-"
                 logger.debug(
-                    f"saving a copy of the final (after optimization) {input_file} and {output_file} files in {target_dir}"
+                    f"saving the final {input_file} and {output_file} files after optimization to {target_dir}/{cp_file}{input_file} and {target_dir}/{cp_file}{output_file}"
                 )
-                shutil.copy(input_file, target_dir + "/" + self.state_1.get_chemical_formula() + "-end-" + input_file)
-                shutil.copy(output_file, target_dir + "/" + self.state_1.get_chemical_formula() + "-end-" + output_file)
+                shutil.copy(input_file, cp_file + input_file)
+                shutil.copy(output_file, cp_file + output_file)
         else:
             pass
 
