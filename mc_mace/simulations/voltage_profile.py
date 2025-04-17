@@ -267,6 +267,88 @@ class VoltageProfile(BaseSimulation):
         else:
             pass
 
+    def _restart(self) -> None:
+        """
+        Continue the simulation from the previous state.
+        """
+        if self.sim_settings["continue"]:
+            file_pattern = "[0-9][0-9][0-9]-*.xyz"
+            files = glob.glob(file_pattern, root_dir=self.out_state_folder)
+            csv_file_pattern = f"{self.out_state_folder}/[0-9][0-9][0-9]-*.csv"
+            csv_files = glob.glob(csv_file_pattern)
+
+        if not files:
+            logger.info("No files found for restarting. Volta profile will start from scratch.")
+            self._scratch()
+        else:
+            _file = max(files, key=lambda x: int(x[:3]))
+            logger.info(f"Continuing volta profile from {_file}")
+            if len(csv_files) > 0:
+                self.saved_state_files.extend(csv_files)
+            else:
+                raise ValueError(f"No csv state files found in {self.out_state_folder}")
+            self.state_0 = read(self.out_state_folder + "/" + _file)
+            cont_state = int(_file[:3])
+            for self._i_state in range(cont_state + 1, self.n_states):
+                self._find_atom_to_remove()
+
+                self.update_files()
+                self.update_states()
+
+    def _scratch(self) -> None:
+        """
+        Start the simulation from scratch.
+        """
+        for self._i_state in range(self.n_states):
+            logger.info(f" State {self._i_state} ".center(120, "-"))
+            if self._i_state == 0:
+                self._ai = -1
+                self.state_0 = self.system.copy()
+                self.state_1 = self.state_0.copy()
+                logger.info(
+                    self.__logger_prefix()
+                    + f"Optimizing (position and cell) initial configuration {self.state_0.get_chemical_formula()}"
+                )
+                if "calculation" in self.sim_settings:
+                    self.sim_settings["calculation"] = "scf"
+                    self.sim_settings["restart_mode"] = "from_scratch"
+                self.state_1.calc = self.calculator
+                energy_start = self._get_potential_energy_new_state()
+                self.copy_pw_io(start=True)
+                force_max_start = np.max(np.linalg.norm(self.state_1.get_forces(), axis=1))
+                cell_start = self.state_1.cell.cellpar()
+                vol_start = self.state_1.cell.volume
+                logger.debug(f"optimizing system {self.state_1.get_chemical_formula()}")
+                self.state_1 = self._optimize_system(self.state_1)
+                energy_end = self._get_potential_energy_new_state()
+                self.copy_pw_io(start=False)
+                force_max_end = np.max(np.linalg.norm(self.state_1.get_forces(), axis=1))
+                cell_end = self.state_1.cell.cellpar()
+                vol_end = self.state_1.cell.volume
+                logger.info(self.__logger_prefix() + f"Energy {energy_start:.3f} eV -> {energy_end:.3f} eV")
+                logger.info(
+                    self.__logger_prefix() + f"Max Force {force_max_start:.3e} eV/A -> {force_max_end:.3e} eV/A"
+                )
+                logger.info(self.__logger_prefix() + f"Cell lengths [a, b, c] {cell_start[:3]} A -> {cell_end[:3]} A")
+                logger.info(self.__logger_prefix() + f"Cell angles [α,β,γ] {cell_start[3:]} ° -> {cell_end[3:]} °")
+                logger.info(self.__logger_prefix() + f"Cell volume {vol_start:.3f} A^3 -> {vol_end:.3f} A^3")
+                # self._energy_store_thermo.append(self._get_potential_energy_new_state())
+                self._energy_store_thermo.append(energy_end)
+                self.save_state()
+                # self._ai = -1
+                # self.state_1 = self.system.copy()
+                # opt_state = self._optimize_system(self.state_1.copy())
+                # self.state_1 = opt_state.copy()
+                # self.state_1.calc = self.calculator
+                # self._energy_store_thermo.append(self.state_1.get_potential_energy())
+                # self.save_state()
+                # self.state_0 = opt_state.copy()
+            else:
+                self._find_atom_to_remove()
+
+            self.update_files()
+            self.update_states()
+
     # Change Abstract methods
     def _load_system(self) -> None:
         self.system = clean_ase_read(self.sim_settings["system"])  # type: ignore[index]
@@ -698,55 +780,11 @@ class VoltageProfile(BaseSimulation):
         """
         self.warmup()
 
-        for self._i_state in range(self.n_states):
-            logger.info(f" State {self._i_state} ".center(120, "-"))
-            if self._i_state == 0:
-                self._ai = -1
-                self.state_0 = self.system.copy()
-                self.state_1 = self.state_0.copy()
-                logger.info(
-                    self.__logger_prefix()
-                    + f"Optimizing (position and cell) initial configuration {self.state_0.get_chemical_formula()}"
-                )
-                if "calculation" in self.sim_settings:
-                    self.sim_settings["calculation"] = "scf"
-                    self.sim_settings["restart_mode"] = "from_scratch"
-                self.state_1.calc = self.calculator
-                energy_start = self._get_potential_energy_new_state()
-                self.copy_pw_io(start=True)
-                force_max_start = np.max(np.linalg.norm(self.state_1.get_forces(), axis=1))
-                cell_start = self.state_1.cell.cellpar()
-                vol_start = self.state_1.cell.volume
-                logger.debug(f"optimizing system {self.state_1.get_chemical_formula()}")
-                self.state_1 = self._optimize_system(self.state_1)
-                energy_end = self._get_potential_energy_new_state()
-                self.copy_pw_io(start=False)
-                force_max_end = np.max(np.linalg.norm(self.state_1.get_forces(), axis=1))
-                cell_end = self.state_1.cell.cellpar()
-                vol_end = self.state_1.cell.volume
-                logger.info(self.__logger_prefix() + f"Energy {energy_start:.3f} eV -> {energy_end:.3f} eV")
-                logger.info(
-                    self.__logger_prefix() + f"Max Force {force_max_start:.3e} eV/A -> {force_max_end:.3e} eV/A"
-                )
-                logger.info(self.__logger_prefix() + f"Cell lengths [a, b, c] {cell_start[:3]} A -> {cell_end[:3]} A")
-                logger.info(self.__logger_prefix() + f"Cell angles [α,β,γ] {cell_start[3:]} ° -> {cell_end[3:]} °")
-                logger.info(self.__logger_prefix() + f"Cell volume {vol_start:.3f} A^3 -> {vol_end:.3f} A^3")
-                # self._energy_store_thermo.append(self._get_potential_energy_new_state())
-                self._energy_store_thermo.append(energy_end)
-                self.save_state()
-                # self._ai = -1
-                # self.state_1 = self.system.copy()
-                # opt_state = self._optimize_system(self.state_1.copy())
-                # self.state_1 = opt_state.copy()
-                # self.state_1.calc = self.calculator
-                # self._energy_store_thermo.append(self.state_1.get_potential_energy())
-                # self.save_state()
-                # self.state_0 = opt_state.copy()
-            else:
-                self._find_atom_to_remove()
+        if self.sim_settings["continue"]:
+            self._restart()
+        else:
+            self._scratch()
 
-            self.update_files()
-            self.update_states()
         logger.info("Computing Convex Hull")
         self._voltage_calculator = VoltageCalculator(
             self.saved_state_files, self.element, self.chemical_potential, self._charge_carried
