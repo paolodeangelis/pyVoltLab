@@ -203,8 +203,8 @@ class VoltageProfile(BaseSimulation):
         """
         Extract quantum espresso input parameters to be provided to the espress calculator.
         """
-        self.sim_settings["pw_input"] = {
-            "calculation": "scf",  # self.sim_settings["calculation"],
+        pw_input = {
+            "calculation": self.sim_settings["calculation"],
             "restart_mode": self.sim_settings["restart_mode"],
             "verbosity": self.sim_settings["verbosity"],
             "outdir": self.sim_settings["outdir"],
@@ -227,7 +227,7 @@ class VoltageProfile(BaseSimulation):
             "ecutwfc": self.sim_settings["ecutwfc"],
             "ecutrho": self.sim_settings["ecutrho"],
         }
-        logger.info("Quantum espresso input file espresso.pwi created successfully.")
+        return pw_input
 
     def _get_profile(self) -> EspressoProfile:
         """
@@ -245,7 +245,7 @@ class VoltageProfile(BaseSimulation):
         """
         Copy the input and output files for quantum espresso.
         """
-        if self.sim_settings.get("calculation") == "scf":
+        if self.sim_settings.get("calculation") is not None:
             input_file = "espresso.pwi"
             output_file = "espresso.pwo"
             target_dir = self.sim_settings["states folder"] + "/" + self.state_1.get_chemical_formula()
@@ -255,15 +255,15 @@ class VoltageProfile(BaseSimulation):
                 logger.debug(
                     f"saving the  starting {input_file} and {output_file} files before optimization to {target_dir}/{cp_file}{input_file} and {target_dir}/{cp_file}{output_file}"
                 )
-                shutil.copy(input_file, cp_file + input_file)
-                shutil.copy(output_file, cp_file + output_file)
+                shutil.copy(self.sim_settings["QE_dir"] + "/" + input_file, cp_file + input_file)
+                shutil.copy(self.sim_settings["QE_dir"] + "/" + output_file, cp_file + output_file)
             else:
                 cp_file = target_dir + "/" + self.state_1.get_chemical_formula() + "-end-" + str(self._ai) + "-"
                 logger.debug(
                     f"saving the final {input_file} and {output_file} files after optimization to {target_dir}/{cp_file}{input_file} and {target_dir}/{cp_file}{output_file}"
                 )
-                shutil.copy(input_file, cp_file + input_file)
-                shutil.copy(output_file, cp_file + output_file)
+                shutil.copy(self.sim_settings["QE_dir"] + "/" + input_file, cp_file + input_file)
+                shutil.copy(self.sim_settings["QE_dir"] + "/" + output_file, cp_file + output_file)
         else:
             pass
 
@@ -281,14 +281,14 @@ class VoltageProfile(BaseSimulation):
 
         elif "calculation" in self.sim_settings:
             logger.debug("Loading Quantum espresso calculator")
-            self._pw_input_file()  # to get self.sim_settings["pw_input"]
 
             self.calculator = Espresso(
-                input_data=self.sim_settings["pw_input"],
+                input_data=self._pw_input_file(),
                 profile=self._get_profile(),
                 pseudopotentials=self.sim_settings["pseudopotentials"],
                 kpts=self.sim_settings["kpts"],
                 koffset=self.sim_settings["koffset"],
+                directory=self.sim_settings["QE_dir"],
             )
 
     def _compute_chemical_potentials(self) -> tuple[list[str], list[float]]:
@@ -364,7 +364,7 @@ class VoltageProfile(BaseSimulation):
             ValueError: If the trajectory file path is not set.
         """
         atoms = self.state_1.copy()
-        energy = self._get_potetial_energy_new_state()
+        energy = self._get_potential_energy_new_state()
         volume = self.state_1.get_volume()
         atoms.info["volume"] = volume
         atoms.info["potential_energy"] = energy
@@ -394,7 +394,7 @@ class VoltageProfile(BaseSimulation):
         """
         if self.out_thermo is not None:
             atoms = self.state_1.copy()
-            energy = self._get_potetial_energy_new_state()
+            energy = self._get_potential_energy_new_state()
             volume = self.state_1.get_volume()
             mean_energy = np.nanmean(self._energy_store_thermo)
             std_energy = np.nanstd(self._energy_store_thermo)
@@ -412,7 +412,7 @@ class VoltageProfile(BaseSimulation):
 
     def _save_state_xyz(self, file_path: str) -> None:
         atoms = self.state_1.copy()
-        energy = self._get_potetial_energy_new_state()
+        energy = self._get_potential_energy_new_state()
         volume = self.state_1.get_volume()
         atoms.info["volume"] = volume
         atoms.info["potential_energy"] = energy
@@ -443,7 +443,7 @@ class VoltageProfile(BaseSimulation):
         """
         if self.out_state_folder is not None:
             atoms = self.state_1.copy()
-            energy = self._get_potetial_energy_new_state()
+            energy = self._get_potential_energy_new_state()
             volume = self.state_1.get_volume()
             formula = atoms.get_chemical_formula(mode="hill", empirical=False)
             files = glob.glob(os.path.join(str(self.out_state_folder), f"*-{formula}.csv"))
@@ -480,37 +480,56 @@ class VoltageProfile(BaseSimulation):
         Returns:
             float: Optimized potential energy of the system.
         """
-        atoms.calc = self.calculator
-        ucf = FrechetCellFilter(atoms)  # ExpCellFilter(atoms)
-        out = StringIO()
-        if self._optimizer_type.upper() == "BFGS":
-            optimizer = BFGS(ucf, logfile=out)
-        elif self._optimizer_type.upper() == "LBFGS":
-            optimizer = LBFGS(ucf, logfile=out)
-        elif self._optimizer_type.upper() == "FIRE":
-            optimizer = FIRE(ucf, logfile=out)
-        elif self._optimizer_type.upper() == "FIRE2":
-            optimizer = FIRE2(ucf, logfile=out)
-        elif self._optimizer_type.upper() == "GPMIN":
-            optimizer = GPMin(ucf, logfile=out)
-        elif self._optimizer_type.upper() == "MDMIN":
-            optimizer = MDMin(ucf, logfile=out)
-        elif self._optimizer_type.upper() == "BFGSLineSearch".upper():
-            optimizer = BFGSLineSearch(ucf, logfile=out)
-        else:
-            logger.error(f"Unsupported optimizer type {self._optimizer_type}")
-            raise ValueError(f"Unsupported optimizer type {self._optimizer_type}")
+        if "mace_model" in self.sim_settings:
+            atoms.calc = self.calculator
+            ucf = FrechetCellFilter(atoms)  # ExpCellFilter(atoms)
+            out = StringIO()
+            if self._optimizer_type.upper() == "BFGS":
+                optimizer = BFGS(ucf, logfile=out)
+            elif self._optimizer_type.upper() == "LBFGS":
+                optimizer = LBFGS(ucf, logfile=out)
+            elif self._optimizer_type.upper() == "FIRE":
+                optimizer = FIRE(ucf, logfile=out)
+            elif self._optimizer_type.upper() == "FIRE2":
+                optimizer = FIRE2(ucf, logfile=out)
+            elif self._optimizer_type.upper() == "GPMIN":
+                optimizer = GPMin(ucf, logfile=out)
+            elif self._optimizer_type.upper() == "MDMIN":
+                optimizer = MDMin(ucf, logfile=out)
+            elif self._optimizer_type.upper() == "BFGSLineSearch".upper():
+                optimizer = BFGSLineSearch(ucf, logfile=out)
+            else:
+                logger.error(f"Unsupported optimizer type {self._optimizer_type}")
+                raise ValueError(f"Unsupported optimizer type {self._optimizer_type}")
 
-        # with redirect_stdout(out):
-        self._converged = optimizer.run(fmax=self._fmax, steps=self._max_steps)
-        for line in out.getvalue().splitlines():
-            logger.debug(self.__logger_prefix() + line)
-        if not self._converged:
-            logger.warning(f"The optimization with {self._optimizer_type} not converged after {self._max_steps} steps")
+            # with redirect_stdout(out):
+            self._converged = optimizer.run(fmax=self._fmax, steps=self._max_steps)
+            for line in out.getvalue().splitlines():
+                logger.debug(self.__logger_prefix() + line)
+            if not self._converged:
+                logger.warning(
+                    f"The optimization with {self._optimizer_type} not converged after {self._max_steps} steps"
+                )
+
+        elif "calculation" in self.sim_settings:
+            logger.debug("Optimization method: quantum espresso vc-relaxation")
+            self.sim_settings["calculation"] = "vc-relax"
+            #            self.sim_settings["restart_mode"] = "restart"
+            self.sim_settings["restart_mode"] = "from_scratch"
+            self._set_calculator()
+            atoms.calc = self.calculator
+            try:
+                atoms.get_potential_energy()
+                self._converged = True
+                self.copy_pw_io(start=False)
+            except Exception as e:
+                logger.error(f"Error: {e}")
+                self._converged = False
+
         return atoms
 
     @profiler_calc.track
-    def _get_potetial_energy_new_state(self):
+    def _get_potential_energy_new_state(self):
         return self.state_1.get_potential_energy()
 
     def _find_atom_to_remove(self):
@@ -534,15 +553,19 @@ class VoltageProfile(BaseSimulation):
                 self.__logger_prefix()
                 + f"Optimizing (position and cell) after removing atom id:{self._ai} from system {self.state_0.get_chemical_formula()}"
             )
+            if "calculation" in self.sim_settings:
+                self.sim_settings["calculation"] = "scf"
+                self.sim_settings["restart_mode"] = "from_scratch"
+                self._set_calculator()
             self.state_1.calc = self.calculator
-            energy_start = self._get_potetial_energy_new_state()
+            energy_start = self._get_potential_energy_new_state()
             self.copy_pw_io(start=True)
             logger.debug(f"optimizing system {self.state_1.get_chemical_formula()}")
             force_max_start = np.max(np.linalg.norm(self.state_1.get_forces(), axis=1))
             cell_start = self.state_1.cell.cellpar()
             vol_start = self.state_1.cell.volume
             self.state_1 = self._optimize_system(self.state_1)
-            energy_end = self._get_potetial_energy_new_state()
+            energy_end = self._get_potential_energy_new_state()
             self.copy_pw_io(start=False)
             force_max_end = np.max(np.linalg.norm(self.state_1.get_forces(), axis=1))
             cell_end = self.state_1.cell.cellpar()
@@ -552,7 +575,7 @@ class VoltageProfile(BaseSimulation):
             logger.info(self.__logger_prefix() + f"Cell lengths [a, b, c] {cell_start[:3]} A -> {cell_end[:3]} A")
             logger.info(self.__logger_prefix() + f"Cell angles [α,β,γ] {cell_start[3:]} ° -> {cell_end[3:]} °")
             logger.info(self.__logger_prefix() + f"Cell volume {vol_start:.3f} A^3 -> {vol_end:.3f} A^3")
-            self._energy_store_thermo.append(self._get_potetial_energy_new_state())
+            self._energy_store_thermo.append(energy_end)
             self.save_state()
             if energy_end < min_energy:
                 min_energy = energy_end
@@ -685,15 +708,18 @@ class VoltageProfile(BaseSimulation):
                     self.__logger_prefix()
                     + f"Optimizing (position and cell) initial configuration {self.state_0.get_chemical_formula()}"
                 )
+                if "calculation" in self.sim_settings:
+                    self.sim_settings["calculation"] = "scf"
+                    self.sim_settings["restart_mode"] = "from_scratch"
                 self.state_1.calc = self.calculator
-                energy_start = self._get_potetial_energy_new_state()
+                energy_start = self._get_potential_energy_new_state()
                 self.copy_pw_io(start=True)
                 force_max_start = np.max(np.linalg.norm(self.state_1.get_forces(), axis=1))
                 cell_start = self.state_1.cell.cellpar()
                 vol_start = self.state_1.cell.volume
                 logger.debug(f"optimizing system {self.state_1.get_chemical_formula()}")
                 self.state_1 = self._optimize_system(self.state_1)
-                energy_end = self._get_potetial_energy_new_state()
+                energy_end = self._get_potential_energy_new_state()
                 self.copy_pw_io(start=False)
                 force_max_end = np.max(np.linalg.norm(self.state_1.get_forces(), axis=1))
                 cell_end = self.state_1.cell.cellpar()
@@ -705,7 +731,7 @@ class VoltageProfile(BaseSimulation):
                 logger.info(self.__logger_prefix() + f"Cell lengths [a, b, c] {cell_start[:3]} A -> {cell_end[:3]} A")
                 logger.info(self.__logger_prefix() + f"Cell angles [α,β,γ] {cell_start[3:]} ° -> {cell_end[3:]} °")
                 logger.info(self.__logger_prefix() + f"Cell volume {vol_start:.3f} A^3 -> {vol_end:.3f} A^3")
-                # self._energy_store_thermo.append(self._get_potetial_energy_new_state())
+                # self._energy_store_thermo.append(self._get_potential_energy_new_state())
                 self._energy_store_thermo.append(energy_end)
                 self.save_state()
                 # self._ai = -1
