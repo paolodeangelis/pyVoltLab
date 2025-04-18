@@ -309,9 +309,6 @@ class VoltageProfile(BaseSimulation):
                     self.__logger_prefix()
                     + f"Optimizing (position and cell) initial configuration {self.state_0.get_chemical_formula()}"
                 )
-                if "calculation" in self.sim_settings:
-                    self.sim_settings["calculation"] = "scf"
-                    self.sim_settings["restart_mode"] = "from_scratch"
                 self.state_1.calc = self.calculator
                 energy_start = self._get_potential_energy_new_state()
                 self.copy_pw_io(start=True)
@@ -562,7 +559,18 @@ class VoltageProfile(BaseSimulation):
         Returns:
             float: Optimized potential energy of the system.
         """
-        if "mace_model" in self.sim_settings:
+        if self.sim_settings.get("calculation") == "vc-relax":
+            logger.debug("Optimization method: quantum espresso vc-relaxation")
+            try:
+                atoms.get_potential_energy()
+                self._converged = True
+                self.copy_pw_io(start=False)
+            except Exception as e:
+                logger.error(f"Error: {e}")
+                self._converged = False
+
+        else:
+            logger.debug(f"Optimization method: {self._optimizer_type} with {self.calculator}")
             atoms.calc = self.calculator
             ucf = FrechetCellFilter(atoms)  # ExpCellFilter(atoms)
             out = StringIO()
@@ -592,26 +600,11 @@ class VoltageProfile(BaseSimulation):
                 logger.warning(
                     f"The optimization with {self._optimizer_type} not converged after {self._max_steps} steps"
                 )
-
-        elif "calculation" in self.sim_settings:
-            logger.debug("Optimization method: quantum espresso vc-relaxation")
-            self.sim_settings["calculation"] = "vc-relax"
-            #            self.sim_settings["restart_mode"] = "restart"
-            self.sim_settings["restart_mode"] = "from_scratch"
-            self._set_calculator()
-            atoms.calc = self.calculator
-            try:
-                atoms.get_potential_energy()
-                self._converged = True
-                self.copy_pw_io(start=False)
-            except Exception as e:
-                logger.error(f"Error: {e}")
-                self._converged = False
-
         return atoms
 
     @profiler_calc.track
     def _get_potential_energy_new_state(self):
+        logger.debug("Computing potential energy")
         return self.state_1.get_potential_energy()
 
     def _find_atom_to_remove(self):
@@ -635,14 +628,10 @@ class VoltageProfile(BaseSimulation):
                 self.__logger_prefix()
                 + f"Optimizing (position and cell) after removing atom id:{self._ai} from system {self.state_0.get_chemical_formula()}"
             )
-            if "calculation" in self.sim_settings:
-                self.sim_settings["calculation"] = "scf"
-                self.sim_settings["restart_mode"] = "from_scratch"
-                self._set_calculator()
             self.state_1.calc = self.calculator
             energy_start = self._get_potential_energy_new_state()
             self.copy_pw_io(start=True)
-            logger.debug(f"optimizing system {self.state_1.get_chemical_formula()}")
+            logger.debug(f"Optimizing system {self.state_1.get_chemical_formula()}")
             force_max_start = np.max(np.linalg.norm(self.state_1.get_forces(), axis=1))
             cell_start = self.state_1.cell.cellpar()
             vol_start = self.state_1.cell.volume
@@ -704,7 +693,8 @@ class VoltageProfile(BaseSimulation):
         logger.info("")
         logger.info("Stating 0-K Voltage Profile simulation".center(120, " "))
         logger.info(f"Number of states = {self.n_states}")
-        logger.info(f"Optimizer: {self._optimizer_type} (fmax={self._fmax:.2e}, max steps={self._max_steps})")
+        if self.sim_settings.get("calculation") != "vc-relax":
+            logger.info(f"Optimizer: {self._optimizer_type} (fmax={self._fmax:.2e}, max steps={self._max_steps})")
         logger.info("")
         if self.save_trj_step:
             logger.info(f"Saving trajectory in `{self.out_trj}` every {self.save_trj_step} steps")
