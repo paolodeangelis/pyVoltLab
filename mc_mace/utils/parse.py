@@ -6,6 +6,7 @@ from loguru import logger
 
 # Define default values for optional parameters
 DEFAULTS_MACE = {
+    "continue": False,
     "optimizer": {
         "type": "FIRE2",
         "fmax": 0.05,
@@ -25,6 +26,7 @@ REQUIRED_ENTRIES_MACE = ["system", "working ion", "mace_model"]
 
 # Define default values for optional parameters
 DEFAULTS_DFT = {
+    "continue": False,
     "calculation": "scf",
     "restart_mode": "from_scratch",
     "verbosity": "low",
@@ -40,7 +42,7 @@ DEFAULTS_DFT = {
     "degauss": 0.01,
     "smearing": "cold",
     "conv_thr": 1e-8,  # pwscf default = 1e-6
-    "electron_maxsteps": 100,
+    "electron_maxstep": 1000,
     "mixing_mode": "plain",
     "mixing_beta": 0.7,
     "diagonalization": "david",
@@ -59,6 +61,7 @@ DEFAULTS_DFT = {
         "convex hull": "convexhull.csv",
     },
     "states folder": "states",
+    "QE_dir": "QE",
 }
 
 # List of required parameters

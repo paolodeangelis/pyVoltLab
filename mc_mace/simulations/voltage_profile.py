@@ -277,22 +277,23 @@ class VoltageProfile(BaseSimulation):
             csv_file_pattern = f"{self.out_state_folder}/[0-9][0-9][0-9]-*.csv"
             csv_files = glob.glob(csv_file_pattern)
 
+        if len(csv_files) != len(files):
+            raise RuntimeError(
+                f"The number of .csv files should be the same as the number of .xyz files. Check {self.out_state_folder} or choose continue: False to start from scratch."
+            )
         if not files:
             logger.info("No files found for restarting. Volta profile will start from scratch.")
             self._scratch()
         else:
             _file = max(files, key=lambda x: int(x[:3]))
             logger.info(f"Continuing volta profile from {_file}")
-            if len(csv_files) > 0:
-                self.saved_state_files.extend(csv_files)
-            else:
-                raise ValueError(f"No csv state files found in {self.out_state_folder}")
+            self.saved_state_files.extend(csv_files)
             self.state_0 = read(self.out_state_folder + "/" + _file)
             cont_state = int(_file[:3])
             for self._i_state in range(cont_state + 1, self.n_states):
-                self._find_atom_to_remove()
+                _energy = self._find_atom_to_remove()
 
-                self.update_files()
+                self.update_files(_energy)
                 self.update_states()
 
     def _scratch(self) -> None:
@@ -331,7 +332,7 @@ class VoltageProfile(BaseSimulation):
                 logger.info(self.__logger_prefix() + f"Cell volume {vol_start:.3f} A^3 -> {vol_end:.3f} A^3")
                 # self._energy_store_thermo.append(self._get_potential_energy_new_state())
                 self._energy_store_thermo.append(energy_end)
-                self.save_state()
+                self.save_state(energy_end)
                 # self._ai = -1
                 # self.state_1 = self.system.copy()
                 # opt_state = self._optimize_system(self.state_1.copy())
@@ -341,9 +342,9 @@ class VoltageProfile(BaseSimulation):
                 # self.save_state()
                 # self.state_0 = opt_state.copy()
             else:
-                self._find_atom_to_remove()
+                energy_end = self._find_atom_to_remove()
 
-            self.update_files()
+            self.update_files(energy_end)
             self.update_states()
 
     # Change Abstract methods
@@ -417,7 +418,7 @@ class VoltageProfile(BaseSimulation):
         if self.out_thermo is not None:
             self._out_thermo_header()
 
-    def update_files(self) -> None:
+    def update_files(self, _energy: float) -> None:
         """
         Update all output files according to the current simulation step.
 
@@ -425,14 +426,14 @@ class VoltageProfile(BaseSimulation):
         based on their respective save frequencies.
         """
         if self.out_trj is not None and self._i_state % self.save_trj_step == 0:  # type: ignore[operator]
-            self.save_trj()
+            self.save_trj(_energy)
         if self.out_thermo is not None and self._i_state % self.save_thermo_step == 0:  # type: ignore[operator]
-            self.save_thermo()
+            self.save_thermo(_energy)
         # if self.out_state_folder is not None and self._i_state % self.save_state_step == 0 or self._new_state:  # type: ignore[operator]
         #     self.save_state()
 
     @profiler_io.track
-    def save_trj(self) -> None:
+    def save_trj(self, _energy: float) -> None:
         """
         Save the current state of the simulation to the trajectory file.
 
@@ -443,7 +444,7 @@ class VoltageProfile(BaseSimulation):
             ValueError: If the trajectory file path is not set.
         """
         atoms = self.state_1.copy()
-        energy = self._get_potential_energy_new_state()
+        energy = _energy
         volume = self.state_1.get_volume()
         atoms.info["volume"] = volume
         atoms.info["potential_energy"] = energy
@@ -461,7 +462,7 @@ class VoltageProfile(BaseSimulation):
             )
 
     @profiler_io.track
-    def save_thermo(self) -> None:
+    def save_thermo(self, _energy: float) -> None:
         """
         Save thermodynamic properties to the thermo file.
 
@@ -473,7 +474,7 @@ class VoltageProfile(BaseSimulation):
         """
         if self.out_thermo is not None:
             atoms = self.state_1.copy()
-            energy = self._get_potential_energy_new_state()
+            energy = _energy
             volume = self.state_1.get_volume()
             mean_energy = np.nanmean(self._energy_store_thermo)
             std_energy = np.nanstd(self._energy_store_thermo)
@@ -489,9 +490,9 @@ class VoltageProfile(BaseSimulation):
             )
             logger.debug(f"Updated thermo file: {self.out_thermo}")
 
-    def _save_state_xyz(self, file_path: str) -> None:
+    def _save_state_xyz(self, file_path: str, _energy: float) -> None:
         atoms = self.state_1.copy()
-        energy = self._get_potential_energy_new_state()
+        energy = _energy
         volume = self.state_1.get_volume()
         atoms.info["volume"] = volume
         atoms.info["potential_energy"] = energy
@@ -508,7 +509,7 @@ class VoltageProfile(BaseSimulation):
         )
 
     @profiler_io.track
-    def save_state(self) -> None:
+    def save_state(self, _energy: float) -> None:
         """
         Save the current simulation state to a state file.
 
@@ -522,7 +523,7 @@ class VoltageProfile(BaseSimulation):
         """
         if self.out_state_folder is not None:
             atoms = self.state_1.copy()
-            energy = self._get_potential_energy_new_state()
+            energy = _energy
             volume = self.state_1.get_volume()
             formula = atoms.get_chemical_formula(mode="hill", empirical=False)
             files = glob.glob(os.path.join(str(self.out_state_folder), f"*-{formula}.csv"))
@@ -545,7 +546,7 @@ class VoltageProfile(BaseSimulation):
                 file_path,
                 f"{self._ai:<10d}, {energy:15.8e}, {volume:15.8e}, {len(atoms):15d}",
             )
-            self._save_state_xyz(conf_file_path)
+            self._save_state_xyz(conf_file_path, _energy)
             logger.debug(f"Updated state file: {file_path}")
 
     @profiler_calc.track
@@ -607,13 +608,13 @@ class VoltageProfile(BaseSimulation):
         logger.debug("Computing potential energy")
         return self.state_1.get_potential_energy()
 
-    def _find_atom_to_remove(self):
+    def _find_atom_to_remove(self) -> float:
         """
         Identify the atom to remove by computing energy differences.
 
-
         Returns:
             int: Index of the atom to remove.
+            float: The minimum total energy obtained after removing one atom.
         """
         min_energy = float("inf")
         atom_to_remove = np.where(self.state_0.get_atomic_numbers() == atomic_numbers[self.element])[0]
@@ -647,7 +648,7 @@ class VoltageProfile(BaseSimulation):
             logger.info(self.__logger_prefix() + f"Cell angles [α,β,γ] {cell_start[3:]} ° -> {cell_end[3:]} °")
             logger.info(self.__logger_prefix() + f"Cell volume {vol_start:.3f} A^3 -> {vol_end:.3f} A^3")
             self._energy_store_thermo.append(energy_end)
-            self.save_state()
+            self.save_state(energy_end)
             if energy_end < min_energy:
                 min_energy = energy_end
                 best = self.state_1.copy()
@@ -658,6 +659,8 @@ class VoltageProfile(BaseSimulation):
         )
         self.state_1 = best.copy()
         self.state_1.calc = self.calculator
+
+        return min_energy
 
     def update_states(self):
         self.state_0 = self.state_1.copy()
