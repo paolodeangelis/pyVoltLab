@@ -1,6 +1,5 @@
 import glob
 import os
-import shutil
 import warnings
 from io import StringIO
 from pathlib import Path
@@ -241,32 +240,6 @@ class VoltageProfile(BaseSimulation):
             pseudo_dir=pseudo_dir,
         )
 
-    def copy_pw_io(self, start: bool = False) -> None:
-        """
-        Copy the input and output files for quantum espresso.
-        """
-        if self.sim_settings.get("calculation") is not None:
-            input_file = "espresso.pwi"
-            output_file = "espresso.pwo"
-            target_dir = self.sim_settings["states folder"] + "/" + self.state_1.get_chemical_formula()
-            os.makedirs(target_dir, exist_ok=True)
-            if start:
-                cp_file = target_dir + "/" + self.state_1.get_chemical_formula() + "-start-" + str(self._ai) + "-"
-                logger.debug(
-                    f"saving the  starting {input_file} and {output_file} files before optimization to {target_dir}/{cp_file}{input_file} and {target_dir}/{cp_file}{output_file}"
-                )
-                shutil.copy(self.sim_settings["QE_dir"] + "/" + input_file, cp_file + input_file)
-                shutil.copy(self.sim_settings["QE_dir"] + "/" + output_file, cp_file + output_file)
-            else:
-                cp_file = target_dir + "/" + self.state_1.get_chemical_formula() + "-end-" + str(self._ai) + "-"
-                logger.debug(
-                    f"saving the final {input_file} and {output_file} files after optimization to {target_dir}/{cp_file}{input_file} and {target_dir}/{cp_file}{output_file}"
-                )
-                shutil.copy(self.sim_settings["QE_dir"] + "/" + input_file, cp_file + input_file)
-                shutil.copy(self.sim_settings["QE_dir"] + "/" + output_file, cp_file + output_file)
-        else:
-            pass
-
     def _restart(self) -> None:
         """
         Continue the simulation from the previous state.
@@ -310,16 +283,15 @@ class VoltageProfile(BaseSimulation):
                     self.__logger_prefix()
                     + f"Optimizing (position and cell) initial configuration {self.state_0.get_chemical_formula()}"
                 )
+                self._set_calculator(str(self._ai) + "_" + self.state_1.get_chemical_formula())
                 self.state_1.calc = self.calculator
                 energy_start = self._get_potential_energy_new_state()
-                self.copy_pw_io(start=True)
                 force_max_start = np.max(np.linalg.norm(self.state_1.get_forces(), axis=1))
                 cell_start = self.state_1.cell.cellpar()
                 vol_start = self.state_1.cell.volume
                 logger.debug(f"optimizing system {self.state_1.get_chemical_formula()}")
                 self.state_1 = self._optimize_system(self.state_1)
                 energy_end = self._get_potential_energy_new_state()
-                self.copy_pw_io(start=False)
                 force_max_end = np.max(np.linalg.norm(self.state_1.get_forces(), axis=1))
                 cell_end = self.state_1.cell.cellpar()
                 vol_end = self.state_1.cell.volume
@@ -352,7 +324,7 @@ class VoltageProfile(BaseSimulation):
         self.system = clean_ase_read(self.sim_settings["system"])  # type: ignore[index]
 
     # Change Abstract methods
-    def _set_calculator(self) -> None:
+    def _set_calculator(self, sub_file: str = "temp") -> None:
         if "mace_model" in self.sim_settings:
             with warnings.catch_warnings():
                 logger.debug("Loading MACE model")
@@ -361,14 +333,13 @@ class VoltageProfile(BaseSimulation):
 
         elif "calculation" in self.sim_settings:
             logger.debug("Loading Quantum espresso calculator")
-
             self.calculator = Espresso(
                 input_data=self._pw_input_file(),
                 profile=self._get_profile(),
                 pseudopotentials=self.sim_settings["pseudopotentials"],
                 kpts=self.sim_settings["kpts"],
                 koffset=self.sim_settings["koffset"],
-                directory=self.sim_settings["QE_dir"],
+                directory=self.sim_settings["QE_dir"] + f"/{sub_file}",
             )
 
     def _compute_chemical_potentials(self) -> tuple[list[str], list[float]]:
@@ -393,6 +364,7 @@ class VoltageProfile(BaseSimulation):
             if isinstance(value, str):
                 logger.debug(f"Computing the chemical potential from energy of system {value}")
                 atoms = read(value)
+                self._set_calculator(element)
                 atoms.calc = self.calculator
                 if not np.all(atoms.get_atomic_numbers() == atoms.get_atomic_numbers()[0]):
                     logger.error(f"The system {value} contain more the one element")
@@ -565,7 +537,6 @@ class VoltageProfile(BaseSimulation):
             try:
                 atoms.get_potential_energy()
                 self._converged = True
-                self.copy_pw_io(start=False)
             except Exception as e:
                 logger.error(f"Error: {e}")
                 self._converged = False
@@ -629,16 +600,15 @@ class VoltageProfile(BaseSimulation):
                 self.__logger_prefix()
                 + f"Optimizing (position and cell) after removing atom id:{self._ai} from system {self.state_0.get_chemical_formula()}"
             )
+            self._set_calculator(str(self._ai) + "_" + self.state_1.get_chemical_formula())
             self.state_1.calc = self.calculator
             energy_start = self._get_potential_energy_new_state()
-            self.copy_pw_io(start=True)
             logger.debug(f"Optimizing system {self.state_1.get_chemical_formula()}")
             force_max_start = np.max(np.linalg.norm(self.state_1.get_forces(), axis=1))
             cell_start = self.state_1.cell.cellpar()
             vol_start = self.state_1.cell.volume
             self.state_1 = self._optimize_system(self.state_1)
             energy_end = self._get_potential_energy_new_state()
-            self.copy_pw_io(start=False)
             force_max_end = np.max(np.linalg.norm(self.state_1.get_forces(), axis=1))
             cell_end = self.state_1.cell.cellpar()
             vol_end = self.state_1.cell.volume
