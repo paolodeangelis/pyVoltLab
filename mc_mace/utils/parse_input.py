@@ -6,7 +6,7 @@ from loguru import logger
 from scipy.constants import elementary_charge
 
 OUT_FILE_KEY = ["trajectory", "thermo", "events", "voltage", "convex hull"]
-OUT_FOLDER_KEY = ["states folder"]
+OUT_FOLDER_KEY = ["states folder", "QE_dir"]
 
 # Define default values for optional parameters
 DEFAULTS = {
