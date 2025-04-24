@@ -290,8 +290,7 @@ class VoltageProfile(BaseSimulation):
                 cell_start = self.state_1.cell.cellpar()
                 vol_start = self.state_1.cell.volume
                 logger.debug(f"optimizing system {self.state_1.get_chemical_formula()}")
-                self.state_1 = self._optimize_system(self.state_1)
-                energy_end = self._get_potential_energy_new_state()
+                self.state_1, energy_end = self._optimize_system(self.state_1)
                 force_max_end = np.max(np.linalg.norm(self.state_1.get_forces(), axis=1))
                 cell_end = self.state_1.cell.cellpar()
                 vol_end = self.state_1.cell.volume
@@ -370,8 +369,8 @@ class VoltageProfile(BaseSimulation):
                     logger.error(f"The system {value} contain more the one element")
                 element = atoms.get_chemical_symbols()[0]
                 atoms.calc = self.calculator
-                atoms = self._optimize_system(atoms)
-                mu = float(atoms.get_potential_energy() / len(atoms))
+                atoms, energy_end = self._optimize_system(atoms)
+                mu = float(energy_end / len(atoms))
                 logger.debug(f"mu({element}) = {mu:.3f} eV")
                 self.sim_settings["working ion"]["chemical potential"][element] = mu  # type: ignore[index]
                 potentials.append(mu)
@@ -535,7 +534,7 @@ class VoltageProfile(BaseSimulation):
         if self.sim_settings.get("calculation") == "vc-relax":
             logger.debug("Optimization method: quantum espresso vc-relaxation")
             try:
-                atoms.get_potential_energy()
+                _energy = atoms.get_potential_energy()
                 self._converged = True
             except Exception as e:
                 logger.error(f"Error: {e}")
@@ -572,7 +571,9 @@ class VoltageProfile(BaseSimulation):
                 logger.warning(
                     f"The optimization with {self._optimizer_type} not converged after {self._max_steps} steps"
                 )
-        return atoms
+            self.state_1 = atoms
+            _energy = self._get_potential_energy_new_state()
+        return atoms, _energy
 
     @profiler_calc.track
     def _get_potential_energy_new_state(self):
@@ -607,8 +608,7 @@ class VoltageProfile(BaseSimulation):
             force_max_start = np.max(np.linalg.norm(self.state_1.get_forces(), axis=1))
             cell_start = self.state_1.cell.cellpar()
             vol_start = self.state_1.cell.volume
-            self.state_1 = self._optimize_system(self.state_1)
-            energy_end = self._get_potential_energy_new_state()
+            self.state_1, energy_end = self._optimize_system(self.state_1)
             force_max_end = np.max(np.linalg.norm(self.state_1.get_forces(), axis=1))
             cell_end = self.state_1.cell.cellpar()
             vol_end = self.state_1.cell.volume
