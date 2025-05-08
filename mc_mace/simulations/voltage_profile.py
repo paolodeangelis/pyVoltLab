@@ -211,6 +211,7 @@ class VoltageProfile(BaseSimulation):
             "max_seconds": self.sim_settings["max_seconds"],
             "tstress": self.sim_settings["tstress"],
             "tprnfor": self.sim_settings["tprnfor"],
+            "nstep": self.sim_settings["nstep"],
             "etot_conv_thr": self.sim_settings["etot_conv_thr"],
             "forc_conv_thr": self.sim_settings["forc_conv_thr"],
             "input_dft": self.sim_settings["input_dft"],

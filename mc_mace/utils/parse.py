@@ -33,6 +33,7 @@ DEFAULTS_DFT = {
     "outdir": "./tmp",
     "prefix": "pwscf",
     "max_seconds": 82800,  # 23 hours
+    "nstep": 5000,
     "tstress": True,
     "tprnfor": True,
     "etot_conv_thr": 1e-5,  # pwscf default = 1e-4
