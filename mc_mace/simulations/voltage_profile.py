@@ -1,21 +1,24 @@
 import glob
 import os
+import warnings
 from io import StringIO
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 from ase import Atoms
+from ase.calculators.espresso import Espresso, EspressoProfile
 from ase.data import atomic_numbers
 from ase.filters import ExpCellFilter, FrechetCellFilter, UnitCellFilter  # noqa: F401
 from ase.formula import Formula
 from ase.io import read, write
 from ase.optimize import BFGS, FIRE, FIRE2, LBFGS, BFGSLineSearch, GPMin, MDMin
 from loguru import logger
+from mace.calculators import MACECalculator
 from scipy.spatial import ConvexHull
 
 from mc_mace.utils.io import append_line_to_file, clean_ase_read, save_dict_to_yaml
-from mc_mace.utils.parse_volatege_input import parse_yaml_voltage_input
+from mc_mace.utils.parse import parse_yaml_voltage_input
 from mc_mace.utils.profiler import MethodProfiler
 
 from .simulation_abc import BaseSimulation
@@ -49,6 +52,23 @@ class VoltageCalculator:
             self._state_energy[formula] = data["energy"].values
 
     def get_extremes(self):
+        """
+        Identify the states with the maximum and minimum number of ions.
+
+        This method iterates through the energy states and determines:
+        - The state with the maximum number of working ions (`_formula_full`).
+        - The state with the minimum number of working ions (`_formula_empty`).
+
+        Raises:
+            ValueError: If multiple energy values are found for the same state.
+
+        Attributes Updated:
+            - _formula_full: The formula of the state with the maximum working ions.
+            - _formula_empty: The formula of the state with the minimum working ions.
+            - _energy_full: Energy of the state with the maximum working ions.
+            - _energy_empty: Energy of the state with the minimum working ions.
+            - _n_ion_max: Maximum number of working ions in any state.
+        """
         n_min = float("inf")
         n_max = 0
         for formula_, energy in self._state_energy.items():
@@ -64,7 +84,7 @@ class VoltageCalculator:
                 self._formula_empty = formula_
                 n_min = n_ion
         if len(self._state_energy[self._formula_full]) > 1:
-            print("Too many energy in empty full")
+            print("Too many energy in full state")
             print(self._state_energy[self._formula_full])
         self._energy_full = self._state_energy[self._formula_full]
         self._n_ion_max = n_max
@@ -129,7 +149,7 @@ class VoltageCalculator:
 
 class VoltageProfile(BaseSimulation):
     """
-    Subclass to compute the voltage profile of a system at 0K using MACE force fields.
+    Subclass to compute the voltage profile of a system at 0K using MACE force fields or Quantum espresso DFT.
 
     This subclass removes atoms iteratively and optimizes the structure to compute energy changes.
     """
@@ -142,7 +162,7 @@ class VoltageProfile(BaseSimulation):
         self.state_0: Atoms
         self.state_1: Atoms
         self._i_state: int
-        self._ai: int
+        self._ai: int  # removed atom id
         self.n_states: int
         self._converged: bool
         self.save_trj_step: int
@@ -177,9 +197,150 @@ class VoltageProfile(BaseSimulation):
     def _get_ensemble_settings(self) -> None:
         pass
 
+    # Add new methods
+    def _pw_input_file(self):
+        """
+        Extract quantum espresso input parameters to be provided to the espress calculator.
+        """
+        pw_input = {
+            "calculation": self.sim_settings["calculation"],
+            "restart_mode": self.sim_settings["restart_mode"],
+            "verbosity": self.sim_settings["verbosity"],
+            "outdir": self.sim_settings["outdir"],
+            "prefix": self.sim_settings["prefix"],
+            "max_seconds": self.sim_settings["max_seconds"],
+            "tstress": self.sim_settings["tstress"],
+            "tprnfor": self.sim_settings["tprnfor"],
+            "nstep": self.sim_settings["nstep"],
+            "etot_conv_thr": self.sim_settings["etot_conv_thr"],
+            "forc_conv_thr": self.sim_settings["forc_conv_thr"],
+            "input_dft": self.sim_settings["input_dft"],
+            "occupations": self.sim_settings["occupations"],
+            "degauss": self.sim_settings["degauss"],
+            "smearing": self.sim_settings["smearing"],
+            "conv_thr": self.sim_settings["conv_thr"],
+            "electron_maxstep": self.sim_settings["electron_maxstep"],
+            "mixing_mode": self.sim_settings["mixing_mode"],
+            "mixing_beta": self.sim_settings["mixing_beta"],
+            "diagonalization": self.sim_settings["diagonalization"],
+            "startingwfc": self.sim_settings["startingwfc"],
+            "ecutwfc": self.sim_settings["ecutwfc"],
+            "ecutrho": self.sim_settings["ecutrho"],
+        }
+        return pw_input
+
+    def _get_profile(self) -> EspressoProfile:
+        """
+        Specify the path to the pw.x executable and the pseudopotential directory.
+        """
+        command = self.sim_settings["command"]
+        pseudo_dir = self.sim_settings["pseudo_dir"]
+
+        return EspressoProfile(
+            command=command,
+            pseudo_dir=pseudo_dir,
+        )
+
+    def _restart(self) -> None:
+        """
+        Continue the simulation from the previous state.
+        """
+        if self.sim_settings["continue"]:
+            file_pattern = "[0-9][0-9][0-9]-*.xyz"
+            files = glob.glob(file_pattern, root_dir=self.out_state_folder)
+            csv_file_pattern = f"{self.out_state_folder}/[0-9][0-9][0-9]-*.csv"
+            csv_files = glob.glob(csv_file_pattern)
+
+        if len(csv_files) != len(files):
+            raise RuntimeError(
+                f"The number of .csv files should be the same as the number of .xyz files. Check {self.out_state_folder} or choose continue: False to start from scratch."
+            )
+        if not files:
+            logger.info("No files found for restarting. Volta profile will start from scratch.")
+            self._scratch()
+        else:
+            _file = max(files, key=lambda x: int(x[:3]))
+            logger.info(f"Continuing volta profile from {_file}")
+            self.saved_state_files.extend(csv_files)
+            self.state_0 = read(self.out_state_folder + "/" + _file)
+            cont_state = int(_file[:3])
+            for self._i_state in range(cont_state + 1, self.n_states):
+                _energy = self._find_atom_to_remove()
+
+                self.update_files(_energy)
+                self.update_states()
+
+    def _scratch(self) -> None:
+        """
+        Start the simulation from scratch.
+        """
+        for self._i_state in range(self.n_states):
+            logger.info(f" State {self._i_state} ".center(120, "-"))
+            if self._i_state == 0:
+                self._ai = -1
+                self.state_0 = self.system.copy()
+                self.state_1 = self.state_0.copy()
+                logger.info(
+                    self.__logger_prefix()
+                    + f"Optimizing (position and cell) initial configuration {self.state_0.get_chemical_formula()}"
+                )
+                self._set_calculator(str(self._ai) + "_" + self.state_1.get_chemical_formula())
+                self.state_1.calc = self.calculator
+                energy_start = self._get_potential_energy_new_state()
+                force_max_start = np.max(np.linalg.norm(self.state_1.get_forces(), axis=1))
+                cell_start = self.state_1.cell.cellpar()
+                vol_start = self.state_1.cell.volume
+                logger.debug(f"optimizing system {self.state_1.get_chemical_formula()}")
+                self.state_1, energy_end = self._optimize_system(self.state_1)
+                force_max_end = np.max(np.linalg.norm(self.state_1.get_forces(), axis=1))
+                cell_end = self.state_1.cell.cellpar()
+                vol_end = self.state_1.cell.volume
+                logger.info(self.__logger_prefix() + f"Energy {energy_start:.3f} eV -> {energy_end:.3f} eV")
+                logger.info(
+                    self.__logger_prefix() + f"Max Force {force_max_start:.3e} eV/A -> {force_max_end:.3e} eV/A"
+                )
+                logger.info(self.__logger_prefix() + f"Cell lengths [a, b, c] {cell_start[:3]} A -> {cell_end[:3]} A")
+                logger.info(self.__logger_prefix() + f"Cell angles [α,β,γ] {cell_start[3:]} ° -> {cell_end[3:]} °")
+                logger.info(self.__logger_prefix() + f"Cell volume {vol_start:.3f} A^3 -> {vol_end:.3f} A^3")
+                # self._energy_store_thermo.append(self._get_potential_energy_new_state())
+                self._energy_store_thermo.append(energy_end)
+                self.save_state(energy_end)
+                # self._ai = -1
+                # self.state_1 = self.system.copy()
+                # opt_state = self._optimize_system(self.state_1.copy())
+                # self.state_1 = opt_state.copy()
+                # self.state_1.calc = self.calculator
+                # self._energy_store_thermo.append(self.state_1.get_potential_energy())
+                # self.save_state()
+                # self.state_0 = opt_state.copy()
+            else:
+                energy_end = self._find_atom_to_remove()
+
+            self.update_files(energy_end)
+            self.update_states()
+
     # Change Abstract methods
     def _load_system(self) -> None:
         self.system = clean_ase_read(self.sim_settings["system"])  # type: ignore[index]
+
+    # Change Abstract methods
+    def _set_calculator(self, sub_file: str = "temp") -> None:
+        if "mace_model" in self.sim_settings:
+            with warnings.catch_warnings():
+                logger.debug("Loading MACE model")
+
+                self.calculator = MACECalculator(model_paths=self.sim_settings["mace_model"], device=self.device)  # type: ignore[index]
+
+        elif "calculation" in self.sim_settings:
+            logger.debug("Loading Quantum espresso calculator")
+            self.calculator = Espresso(
+                input_data=self._pw_input_file(),
+                profile=self._get_profile(),
+                pseudopotentials=self.sim_settings["pseudopotentials"],
+                kpts=self.sim_settings["kpts"],
+                koffset=self.sim_settings["koffset"],
+                directory=self.sim_settings["QE_dir"] + f"/{sub_file}",
+            )
 
     def _compute_chemical_potentials(self) -> tuple[list[str], list[float]]:
         """
@@ -203,13 +364,14 @@ class VoltageProfile(BaseSimulation):
             if isinstance(value, str):
                 logger.debug(f"Computing the chemical potential from energy of system {value}")
                 atoms = read(value)
+                self._set_calculator(element)
                 atoms.calc = self.calculator
                 if not np.all(atoms.get_atomic_numbers() == atoms.get_atomic_numbers()[0]):
                     logger.error(f"The system {value} contain more the one element")
                 element = atoms.get_chemical_symbols()[0]
                 atoms.calc = self.calculator
-                atoms = self._optimize_system(atoms)
-                mu = float(atoms.get_potential_energy() / len(atoms))
+                atoms, energy_end = self._optimize_system(atoms)
+                mu = float(energy_end / len(atoms))
                 logger.debug(f"mu({element}) = {mu:.3f} eV")
                 self.sim_settings["working ion"]["chemical potential"][element] = mu  # type: ignore[index]
                 potentials.append(mu)
@@ -228,7 +390,7 @@ class VoltageProfile(BaseSimulation):
         if self.out_thermo is not None:
             self._out_thermo_header()
 
-    def update_files(self) -> None:
+    def update_files(self, _energy: float) -> None:
         """
         Update all output files according to the current simulation step.
 
@@ -236,14 +398,14 @@ class VoltageProfile(BaseSimulation):
         based on their respective save frequencies.
         """
         if self.out_trj is not None and self._i_state % self.save_trj_step == 0:  # type: ignore[operator]
-            self.save_trj()
+            self.save_trj(_energy)
         if self.out_thermo is not None and self._i_state % self.save_thermo_step == 0:  # type: ignore[operator]
-            self.save_thermo()
+            self.save_thermo(_energy)
         # if self.out_state_folder is not None and self._i_state % self.save_state_step == 0 or self._new_state:  # type: ignore[operator]
         #     self.save_state()
 
     @profiler_io.track
-    def save_trj(self) -> None:
+    def save_trj(self, _energy: float) -> None:
         """
         Save the current state of the simulation to the trajectory file.
 
@@ -254,7 +416,7 @@ class VoltageProfile(BaseSimulation):
             ValueError: If the trajectory file path is not set.
         """
         atoms = self.state_1.copy()
-        energy = self._get_potetial_energy_new_state()
+        energy = _energy
         volume = self.state_1.get_volume()
         atoms.info["volume"] = volume
         atoms.info["potential_energy"] = energy
@@ -272,7 +434,7 @@ class VoltageProfile(BaseSimulation):
             )
 
     @profiler_io.track
-    def save_thermo(self) -> None:
+    def save_thermo(self, _energy: float) -> None:
         """
         Save thermodynamic properties to the thermo file.
 
@@ -284,7 +446,7 @@ class VoltageProfile(BaseSimulation):
         """
         if self.out_thermo is not None:
             atoms = self.state_1.copy()
-            energy = self._get_potetial_energy_new_state()
+            energy = _energy
             volume = self.state_1.get_volume()
             mean_energy = np.nanmean(self._energy_store_thermo)
             std_energy = np.nanstd(self._energy_store_thermo)
@@ -300,9 +462,9 @@ class VoltageProfile(BaseSimulation):
             )
             logger.debug(f"Updated thermo file: {self.out_thermo}")
 
-    def _save_state_xyz(self, file_path: str) -> None:
+    def _save_state_xyz(self, file_path: str, _energy: float) -> None:
         atoms = self.state_1.copy()
-        energy = self._get_potetial_energy_new_state()
+        energy = _energy
         volume = self.state_1.get_volume()
         atoms.info["volume"] = volume
         atoms.info["potential_energy"] = energy
@@ -319,7 +481,7 @@ class VoltageProfile(BaseSimulation):
         )
 
     @profiler_io.track
-    def save_state(self) -> None:
+    def save_state(self, _energy: float) -> None:
         """
         Save the current simulation state to a state file.
 
@@ -333,10 +495,10 @@ class VoltageProfile(BaseSimulation):
         """
         if self.out_state_folder is not None:
             atoms = self.state_1.copy()
-            energy = self._get_potetial_energy_new_state()
+            energy = _energy
             volume = self.state_1.get_volume()
             formula = atoms.get_chemical_formula(mode="hill", empirical=False)
-            files = glob.glob(os.path.join(str(self.out_state_folder), f"*{formula}.csv"))
+            files = glob.glob(os.path.join(str(self.out_state_folder), f"*-{formula}.csv"))
             if len(files) < 1:
                 id = len(glob.glob(os.path.join(str(self.out_state_folder), "*.csv")))
                 file_path = os.path.join(str(self.out_state_folder), f"{id:03d}-{formula}.csv")
@@ -356,7 +518,7 @@ class VoltageProfile(BaseSimulation):
                 file_path,
                 f"{self._ai:<10d}, {energy:15.8e}, {volume:15.8e}, {len(atoms):15d}",
             )
-            self._save_state_xyz(conf_file_path)
+            self._save_state_xyz(conf_file_path, _energy)
             logger.debug(f"Updated state file: {file_path}")
 
     @profiler_calc.track
@@ -370,46 +532,62 @@ class VoltageProfile(BaseSimulation):
         Returns:
             float: Optimized potential energy of the system.
         """
-        atoms.calc = self.calculator
-        ucf = FrechetCellFilter(atoms)  # ExpCellFilter(atoms)
-        out = StringIO()
-        if self._optimizer_type.upper() == "BFGS":
-            optimizer = BFGS(ucf, logfile=out)
-        elif self._optimizer_type.upper() == "LBFGS":
-            optimizer = LBFGS(ucf, logfile=out)
-        elif self._optimizer_type.upper() == "FIRE":
-            optimizer = FIRE(ucf, logfile=out)
-        elif self._optimizer_type.upper() == "FIRE2":
-            optimizer = FIRE2(ucf, logfile=out)
-        elif self._optimizer_type.upper() == "GPMIN":
-            optimizer = GPMin(ucf, logfile=out)
-        elif self._optimizer_type.upper() == "MDMIN":
-            optimizer = MDMin(ucf, logfile=out)
-        elif self._optimizer_type.upper() == "BFGSLineSearch".upper():
-            optimizer = BFGSLineSearch(ucf, logfile=out)
-        else:
-            logger.error(f"Unsupported optimizer type {self._optimizer_type}")
-            raise ValueError(f"Unsupported optimizer type {self._optimizer_type}")
+        if self.sim_settings.get("calculation") == "vc-relax":
+            logger.debug("Optimization method: quantum espresso vc-relaxation")
+            try:
+                _energy = atoms.get_potential_energy()
+                self._converged = True
+            except Exception as e:
+                logger.error(f"Error: {e}")
+                self._converged = False
 
-        # with redirect_stdout(out):
-        self._converged = optimizer.run(fmax=self._fmax, steps=self._max_steps)
-        for line in out.getvalue().splitlines():
-            logger.debug(self.__logger_prefix() + line)
-        if not self._converged:
-            logger.warning(f"The optimization with {self._optimizer_type} not converged after {self._max_steps} steps")
-        return atoms
+        else:
+            logger.debug(f"Optimization method: {self._optimizer_type} with {self.calculator}")
+            atoms.calc = self.calculator
+            ucf = FrechetCellFilter(atoms)  # ExpCellFilter(atoms)
+            out = StringIO()
+            if self._optimizer_type.upper() == "BFGS":
+                optimizer = BFGS(ucf, logfile=out)
+            elif self._optimizer_type.upper() == "LBFGS":
+                optimizer = LBFGS(ucf, logfile=out)
+            elif self._optimizer_type.upper() == "FIRE":
+                optimizer = FIRE(ucf, logfile=out)
+            elif self._optimizer_type.upper() == "FIRE2":
+                optimizer = FIRE2(ucf, logfile=out)
+            elif self._optimizer_type.upper() == "GPMIN":
+                optimizer = GPMin(ucf, logfile=out)
+            elif self._optimizer_type.upper() == "MDMIN":
+                optimizer = MDMin(ucf, logfile=out)
+            elif self._optimizer_type.upper() == "BFGSLineSearch".upper():
+                optimizer = BFGSLineSearch(ucf, logfile=out)
+            else:
+                logger.error(f"Unsupported optimizer type {self._optimizer_type}")
+                raise ValueError(f"Unsupported optimizer type {self._optimizer_type}")
+
+            # with redirect_stdout(out):
+            self._converged = optimizer.run(fmax=self._fmax, steps=self._max_steps)
+            for line in out.getvalue().splitlines():
+                logger.debug(self.__logger_prefix() + line)
+            if not self._converged:
+                logger.warning(
+                    f"The optimization with {self._optimizer_type} not converged after {self._max_steps} steps"
+                )
+            self.state_1 = atoms
+            _energy = self._get_potential_energy_new_state()
+        return atoms, _energy
 
     @profiler_calc.track
-    def _get_potetial_energy_new_state(self):
+    def _get_potential_energy_new_state(self):
+        logger.debug("Computing potential energy")
         return self.state_1.get_potential_energy()
 
-    def _find_atom_to_remove(self):
+    def _find_atom_to_remove(self) -> float:
         """
         Identify the atom to remove by computing energy differences.
 
-
         Returns:
             int: Index of the atom to remove.
+            float: The minimum total energy obtained after removing one atom.
         """
         min_energy = float("inf")
         atom_to_remove = np.where(self.state_0.get_atomic_numbers() == atomic_numbers[self.element])[0]
@@ -424,13 +602,14 @@ class VoltageProfile(BaseSimulation):
                 self.__logger_prefix()
                 + f"Optimizing (position and cell) after removing atom id:{self._ai} from system {self.state_0.get_chemical_formula()}"
             )
+            self._set_calculator(str(self._ai) + "_" + self.state_1.get_chemical_formula())
             self.state_1.calc = self.calculator
-            energy_start = self._get_potetial_energy_new_state()
+            energy_start = self._get_potential_energy_new_state()
+            logger.debug(f"Optimizing system {self.state_1.get_chemical_formula()}")
             force_max_start = np.max(np.linalg.norm(self.state_1.get_forces(), axis=1))
             cell_start = self.state_1.cell.cellpar()
             vol_start = self.state_1.cell.volume
-            self.state_1 = self._optimize_system(self.state_1)
-            energy_end = self._get_potetial_energy_new_state()
+            self.state_1, energy_end = self._optimize_system(self.state_1)
             force_max_end = np.max(np.linalg.norm(self.state_1.get_forces(), axis=1))
             cell_end = self.state_1.cell.cellpar()
             vol_end = self.state_1.cell.volume
@@ -439,8 +618,8 @@ class VoltageProfile(BaseSimulation):
             logger.info(self.__logger_prefix() + f"Cell lengths [a, b, c] {cell_start[:3]} A -> {cell_end[:3]} A")
             logger.info(self.__logger_prefix() + f"Cell angles [α,β,γ] {cell_start[3:]} ° -> {cell_end[3:]} °")
             logger.info(self.__logger_prefix() + f"Cell volume {vol_start:.3f} A^3 -> {vol_end:.3f} A^3")
-            self._energy_store_thermo.append(self._get_potetial_energy_new_state())
-            self.save_state()
+            self._energy_store_thermo.append(energy_end)
+            self.save_state(energy_end)
             if energy_end < min_energy:
                 min_energy = energy_end
                 best = self.state_1.copy()
@@ -451,6 +630,8 @@ class VoltageProfile(BaseSimulation):
         )
         self.state_1 = best.copy()
         self.state_1.calc = self.calculator
+
+        return min_energy
 
     def update_states(self):
         self.state_0 = self.state_1.copy()
@@ -486,7 +667,8 @@ class VoltageProfile(BaseSimulation):
         logger.info("")
         logger.info("Stating 0-K Voltage Profile simulation".center(120, " "))
         logger.info(f"Number of states = {self.n_states}")
-        logger.info(f"Optimizer: {self._optimizer_type} (fmax={self._fmax:.2e}, max steps={self._max_steps})")
+        if self.sim_settings.get("calculation") != "vc-relax":
+            logger.info(f"Optimizer: {self._optimizer_type} (fmax={self._fmax:.2e}, max steps={self._max_steps})")
         logger.info("")
         if self.save_trj_step:
             logger.info(f"Saving trajectory in `{self.out_trj}` every {self.save_trj_step} steps")
@@ -562,48 +744,11 @@ class VoltageProfile(BaseSimulation):
         """
         self.warmup()
 
-        for self._i_state in range(self.n_states):
-            logger.info(f" State {self._i_state} ".center(120, "-"))
-            if self._i_state == 0:
-                self._ai = -1
-                self.state_0 = self.system.copy()
-                self.state_1 = self.state_0.copy()
-                logger.info(
-                    self.__logger_prefix()
-                    + f"Optimizing (position and cell) initial configuration {self.state_0.get_chemical_formula()}"
-                )
-                self.state_1.calc = self.calculator
-                energy_start = self._get_potetial_energy_new_state()
-                force_max_start = np.max(np.linalg.norm(self.state_1.get_forces(), axis=1))
-                cell_start = self.state_1.cell.cellpar()
-                vol_start = self.state_1.cell.volume
-                self.state_1 = self._optimize_system(self.state_1)
-                energy_end = self._get_potetial_energy_new_state()
-                force_max_end = np.max(np.linalg.norm(self.state_1.get_forces(), axis=1))
-                cell_end = self.state_1.cell.cellpar()
-                vol_end = self.state_1.cell.volume
-                logger.info(self.__logger_prefix() + f"Energy {energy_start:.3f} eV -> {energy_end:.3f} eV")
-                logger.info(
-                    self.__logger_prefix() + f"Max Force {force_max_start:.3e} eV/A -> {force_max_end:.3e} eV/A"
-                )
-                logger.info(self.__logger_prefix() + f"Cell lengths [a, b, c] {cell_start[:3]} A -> {cell_end[:3]} A")
-                logger.info(self.__logger_prefix() + f"Cell angles [α,β,γ] {cell_start[3:]} ° -> {cell_end[3:]} °")
-                logger.info(self.__logger_prefix() + f"Cell volume {vol_start:.3f} A^3 -> {vol_end:.3f} A^3")
-                self._energy_store_thermo.append(self._get_potetial_energy_new_state())
-                self.save_state()
-                # self._ai = -1
-                # self.state_1 = self.system.copy()
-                # opt_state = self._optimize_system(self.state_1.copy())
-                # self.state_1 = opt_state.copy()
-                # self.state_1.calc = self.calculator
-                # self._energy_store_thermo.append(self.state_1.get_potential_energy())
-                # self.save_state()
-                # self.state_0 = opt_state.copy()
-            else:
-                self._find_atom_to_remove()
+        if self.sim_settings["continue"]:
+            self._restart()
+        else:
+            self._scratch()
 
-            self.update_files()
-            self.update_states()
         logger.info("Computing Convex Hull")
         self._voltage_calculator = VoltageCalculator(
             self.saved_state_files, self.element, self.chemical_potential, self._charge_carried
