@@ -7,6 +7,7 @@ from loguru import logger
 # Define default values for optional parameters
 DEFAULTS_MACE = {
     "continue": False,
+    "removal_method": "semi_brute_force",
     "optimizer": {
         "type": "FIRE2",
         "fmax": 0.05,
@@ -27,6 +28,7 @@ REQUIRED_ENTRIES_MACE = ["system", "working ion", "mace_model"]
 # Define default values for optional parameters
 DEFAULTS_DFT = {
     "continue": False,
+    "removal_method": "semi_brute_force",
     "calculation": "scf",
     "restart_mode": "from_scratch",
     "verbosity": "low",

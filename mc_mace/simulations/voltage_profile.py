@@ -2,6 +2,7 @@ import glob
 import os
 import warnings
 from io import StringIO
+from itertools import combinations
 from pathlib import Path
 
 import numpy as np
@@ -161,9 +162,9 @@ class VoltageProfile(BaseSimulation):
         self._fmax: float = 0.05
         self.state_0: Atoms
         self.state_1: Atoms
-        self._i_state: int
-        self._ai: int  # removed atom id
-        self.n_states: int
+        self._i_state: int  # current state
+        self._ai: list  # removed atom id
+        self.n_states: int  # number of states
         self._converged: bool
         self.save_trj_step: int
         self.save_thermo_step: int
@@ -200,7 +201,7 @@ class VoltageProfile(BaseSimulation):
     # Add new methods
     def _pw_input_file(self):
         """
-        Extract quantum espresso input parameters to be provided to the espress calculator.
+        Extract quantum espresso input parameters to be provided to the espresso calculator.
         """
         pw_input = {
             "calculation": self.sim_settings["calculation"],
@@ -277,7 +278,7 @@ class VoltageProfile(BaseSimulation):
         for self._i_state in range(self.n_states):
             logger.info(f" State {self._i_state} ".center(120, "-"))
             if self._i_state == 0:
-                self._ai = -1
+                self._ai = [-1]
                 self.state_0 = self.system.copy()
                 self.state_1 = self.state_0.copy()
                 logger.info(
@@ -514,9 +515,10 @@ class VoltageProfile(BaseSimulation):
                     f"Found multiple state files with formula {formula}, in folder {self.out_state_folder}"
                 )
 
+            atoms_id = ", ".join(f"{x:<10d}" for x in self._ai)
             append_line_to_file(
                 file_path,
-                f"{self._ai:<10d}, {energy:15.8e}, {volume:15.8e}, {len(atoms):15d}",
+                f"{atoms_id:<10s}, {energy:15.8e}, {volume:15.8e}, {len(atoms):15d}",
             )
             self._save_state_xyz(conf_file_path, _energy)
             logger.debug(f"Updated state file: {file_path}")
@@ -583,6 +585,34 @@ class VoltageProfile(BaseSimulation):
 
     def _find_atom_to_remove(self) -> float:
         """
+        Identify the atom to remove from the system.
+
+        brute_force: Attempts are made starting from original system.
+        semi_brute_force: Attempts are made from the lowest energy structure of previous step.
+        genetic: Genetic algorithm, not implemented yet.
+        cluster_expansion: Not implemented yet.
+        """
+        if self.sim_settings["removal_method"] == "brute_force":
+            logger.info("Brute force method")
+            system = self.system.copy()
+            num_Li_to_be_removed = self.n_states - len(
+                np.where(self.state_0.get_atomic_numbers() == atomic_numbers[self.element])[0]
+            )
+            return self._remove(system, num_Li_to_be_removed)
+        elif self.sim_settings["removal_method"] == "semi_brute_force":
+            logger.info("Semi brute force method")
+            system = self.state_0.copy()
+            num_Li_to_be_removed = 1
+            return self._remove(system, num_Li_to_be_removed)
+        elif self.sim_settings["removal_method"] == "genetic":
+            logger.info("Genetic algorithm method")
+            raise NotImplementedError("Genetic algorithm not implemented")
+        elif self.sim_settings["removal_method"] == "cluster_expansion":
+            logger.info("Cluster expansion method not implemented yet")
+            raise NotImplementedError("Cluster expansion not implemented")
+
+    def _remove(self, system: Atoms, num_Li_to_be_removed: int):
+        """
         Identify the atom to remove by computing energy differences.
 
         Returns:
@@ -590,19 +620,24 @@ class VoltageProfile(BaseSimulation):
             float: The minimum total energy obtained after removing one atom.
         """
         min_energy = float("inf")
-        atom_to_remove = np.where(self.state_0.get_atomic_numbers() == atomic_numbers[self.element])[0]
         best = None
         best_ai = None
-        logger.info(self.__logger_prefix() + f"Removing 1 atom from system {self.state_0.get_chemical_formula()}")
+        atom_to_remove = np.where(system.get_atomic_numbers() == atomic_numbers[self.element])[0]
+        logger.info(
+            self.__logger_prefix() + f"Removing {num_Li_to_be_removed} atom from system {system.get_chemical_formula()}"
+        )
         self._energy_store_thermo = []
-        for self._ai in atom_to_remove:
-            self.state_1 = self.state_0.copy()
-            del self.state_1[self._ai]
+        for self._ai in list(combinations(atom_to_remove, num_Li_to_be_removed)):
+            self.state_1 = system.copy()
+            del self.state_1[list(self._ai)]
             logger.info(
                 self.__logger_prefix()
-                + f"Optimizing (position and cell) after removing atom id:{self._ai} from system {self.state_0.get_chemical_formula()}"
+                + f"Optimizing {self.state_1.get_chemical_formula()} (position and cell) after removing atom id:{self._ai} from system {system.get_chemical_formula()}"
             )
-            self._set_calculator(str(self._ai) + "_" + self.state_1.get_chemical_formula())
+            tag = ""
+            for val in self._ai:
+                tag += str(val)
+            self._set_calculator(tag + "_" + self.state_1.get_chemical_formula())
             self.state_1.calc = self.calculator
             energy_start = self._get_potential_energy_new_state()
             logger.debug(f"Optimizing system {self.state_1.get_chemical_formula()}")
@@ -626,12 +661,23 @@ class VoltageProfile(BaseSimulation):
                 best_ai = self._ai
         logger.debug(
             self.__logger_prefix()
-            + f"Minimal energy obtained by removing {best_ai} atom form {self.state_0.get_chemical_formula()}"
+            + f"Minimal energy obtained by removing {best_ai} atom form {system.get_chemical_formula()}"
         )
         self.state_1 = best.copy()
         self.state_1.calc = self.calculator
-
         return min_energy
+
+    def genetic(self):
+        """
+        Genetic algorithm to find the best atom to remove.
+        """
+        pass
+
+    def cluster_expansion(self):
+        """
+        Cluster expansion to find the best atom to remove.
+        """
+        pass
 
     def update_states(self):
         self.state_0 = self.state_1.copy()
