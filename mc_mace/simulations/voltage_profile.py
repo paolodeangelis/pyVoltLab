@@ -1,5 +1,6 @@
 import glob
 import os
+import shutil
 import warnings
 from io import StringIO
 from itertools import combinations
@@ -247,10 +248,9 @@ class VoltageProfile(BaseSimulation):
         Continue the simulation from the previous state.
         """
         if self.sim_settings["continue"]:
-            file_pattern = "[0-9][0-9][0-9]-*.xyz"
-            files = glob.glob(file_pattern, root_dir=self.out_state_folder)
-            csv_file_pattern = f"{self.out_state_folder}/[0-9][0-9][0-9]-*.csv"
-            csv_files = glob.glob(csv_file_pattern)
+            file_pattern = "[0-9][0-9][0-9]-*"
+            files = glob.glob(file_pattern + ".xyz", root_dir=self.out_state_folder)
+            csv_files = glob.glob(file_pattern + ".csv", root_dir=self.out_state_folder)
 
         if len(csv_files) != len(files):
             raise RuntimeError(
@@ -260,6 +260,11 @@ class VoltageProfile(BaseSimulation):
             logger.info("No files found for restarting. Volta profile will start from scratch.")
             self._scratch()
         else:
+            _max = max(files, key=lambda x: int(x[:3]))
+            _max_csv = max(csv_files, key=lambda x: int(x[:3]))
+            logger.debug(f"Save a copy of {_max_csv} to {_max_csv}_b.")
+            shutil.move(f"{self.out_state_folder}/{_max_csv}", f"{self.out_state_folder}/{_max_csv}_b")
+            files.remove(_max)
             _file = max(files, key=lambda x: int(x[:3]))
             logger.info(f"Continuing volta profile from {_file}")
             self.saved_state_files.extend(csv_files)
@@ -501,7 +506,8 @@ class VoltageProfile(BaseSimulation):
             formula = atoms.get_chemical_formula(mode="hill", empirical=False)
             files = glob.glob(os.path.join(str(self.out_state_folder), f"*-{formula}.csv"))
             if len(files) < 1:
-                id = len(glob.glob(os.path.join(str(self.out_state_folder), "*.csv")))
+                # id = len(glob.glob(os.path.join(str(self.out_state_folder), "*.csv")))
+                id = self._i_state
                 file_path = os.path.join(str(self.out_state_folder), f"{id:03d}-{formula}.csv")
                 self.saved_state_files.append(file_path)
                 self._state_file_header(file_path)
