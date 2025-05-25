@@ -1,6 +1,5 @@
 import glob
 import os
-import shutil
 import warnings
 from io import StringIO
 from itertools import combinations
@@ -250,7 +249,7 @@ class VoltageProfile(BaseSimulation):
         if self.sim_settings["continue"]:
             file_pattern = "[0-9][0-9][0-9]-*"
             files = glob.glob(file_pattern + ".xyz", root_dir=self.out_state_folder)
-            csv_files = glob.glob(file_pattern + ".csv", root_dir=self.out_state_folder)
+            csv_files = glob.glob(f"{self.out_state_folder}/{file_pattern}.csv")
 
         if len(csv_files) != len(files):
             raise RuntimeError(
@@ -260,12 +259,12 @@ class VoltageProfile(BaseSimulation):
             logger.info("No files found for restarting. Volta profile will start from scratch.")
             self._scratch()
         else:
-            _max = max(files, key=lambda x: int(x[:3]))
-            _max_csv = max(csv_files, key=lambda x: int(x[:3]))
-            logger.debug(f"Save a copy of {_max_csv} to {_max_csv}_b.")
-            shutil.move(f"{self.out_state_folder}/{_max_csv}", f"{self.out_state_folder}/{_max_csv}_b")
-            files.remove(_max)
-            _file = max(files, key=lambda x: int(x[:3]))
+            if len(files) == 1:  # if there is only one state, restart will begin at this state
+                _file = max(files, key=lambda x: int(x[:3]))
+            else:  # otherwide, restart will begin at the previous found state
+                _max = max(files, key=lambda x: int(x[:3]))
+                files.remove(_max)
+                _file = max(files, key=lambda x: int(x[:3]))
             logger.info(f"Continuing volta profile from {_file}")
             self.saved_state_files.extend(csv_files)
             self.state_0 = read(self.out_state_folder + "/" + _file)
@@ -788,6 +787,19 @@ class VoltageProfile(BaseSimulation):
         self._voltage_calculator.write_voltage(self.out_voltage)
         logger.info(f"Save file {self.out_voltage}")
 
+    def _restart_convex_hull(self):
+        """
+        Compute convex hull and voltage profile out of the already existing state files
+        """
+        csv_file_pattern = f"{self.out_state_folder}/[0-9][0-9][0-9]-*.csv"
+        csv_files = glob.glob(csv_file_pattern)
+        if len(csv_files) == self.n_states:
+            self.saved_state_files.extend(csv_files)
+        else:
+            raise RuntimeError(
+                f"The number of csv files found is {len(csv_files)}. However, {self.n_state} states are expected"
+            )
+
     def run(self):
         """
         Run the simulation to compute the voltage profile.
@@ -796,19 +808,35 @@ class VoltageProfile(BaseSimulation):
         """
         self.warmup()
 
-        if self.sim_settings["continue"]:
-            self._restart()
-        else:
-            self._scratch()
+        # Find the lowest energy for a specific state
+        if isinstance(self.sim_settings["do_step"], int):
+            system = self.system.copy()
+            self._i_state = self.sim_settings["do_step"]
+            num_Li_to_be_removed = self.sim_settings["do_step"]
+            logger.info(
+                "Find the lowest energy configuration when removing {num_Li_to_be_removed} Li atoms (Brute force)"
+            )
+            self._remove(system, num_Li_to_be_removed)
+            logger.info("DONE!")
 
-        logger.info("Computing Convex Hull")
-        self._voltage_calculator = VoltageCalculator(
-            self.saved_state_files, self.element, self.chemical_potential, self._charge_carried
-        )
-        self.compute_convexhull()
-        self.write_convexhull()
-        logger.info("Computing Voltage steps")
-        self.compute_voltage_profile()
-        self.write_voltage()
-        logger.info(" END ".center(120, "="))
-        self.print_report()
+        else:
+            # Assuming you have all the state csv files, find the convex hull
+            if self.sim_settings["convex_hull"]:
+                logger.info("Computing Convex Hull")
+                self._restart_convex_hull()
+            elif self.sim_settings["continue"]:  # Restart from last found state
+                self._restart()
+            else:
+                self._scratch()
+
+            logger.info("Computing Convex Hull")
+            self._voltage_calculator = VoltageCalculator(
+                self.saved_state_files, self.element, self.chemical_potential, self._charge_carried
+            )
+            self.compute_convexhull()
+            self.write_convexhull()
+            logger.info("Computing Voltage steps")
+            self.compute_voltage_profile()
+            self.write_voltage()
+            logger.info(" END ".center(120, "="))
+            self.print_report()

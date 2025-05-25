@@ -1,6 +1,7 @@
 import os
 import shutil as sh
 from datetime import datetime
+from glob import glob
 from pathlib import Path
 from typing import Any
 
@@ -92,7 +93,7 @@ def create_file_with_backup(file_path: str | Path) -> None:
         raise
 
 
-def create_folder_with_backup(folder_path: str | Path) -> None:
+def create_folder_with_backup(folder_path: str | Path, cont: False) -> None:
     """
     Create a folder. If the folder already exists, create a backup by renaming
     it with a timestamp and then create a new empty folder.
@@ -113,6 +114,10 @@ def create_folder_with_backup(folder_path: str | Path) -> None:
         folder_path = Path(folder_path)
         # os.makedirs(folder_path, exist_ok=True)
         folder_path.mkdir(parents=True, exist_ok=True)
+        if cont:
+            for state_files in glob(os.path.join(backup_path, "*")):
+                if os.path.isfile(state_files):
+                    sh.copy2(state_files, folder_path)  # copy the found states to the new state folder
         logger.debug(f"New folder created: {folder_path}")
     except Exception as e:
         logger.error(f"Failed to create folder or backup: {folder_path}. Error: {e}")

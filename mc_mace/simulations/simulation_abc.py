@@ -52,10 +52,10 @@ def create_out_folders(sim_settings: dict[str, Any]) -> None:
     """
     for k in OUT_FOLDER_KEY:
         try:
+            out_folder = sim_settings[k]
             if sim_settings["continue"]:
-                pass
+                create_folder_with_backup(out_folder, cont=True)
             else:
-                out_folder = sim_settings[k]
                 if out_folder is not None:
                     create_folder_with_backup(out_folder)
                 else:
