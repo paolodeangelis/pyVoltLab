@@ -242,14 +242,34 @@ class VoltageProfile(BaseSimulation):
             pseudo_dir=pseudo_dir,
         )
 
+    def read_restart_files(self):
+        """
+        Read the csv and xyz file for restart
+        """
+        file_pattern = "[0-9][0-9][0-9]-*"
+        files = glob.glob(file_pattern + ".xyz", root_dir=self.out_state_folder)
+        csv_files = glob.glob(f"{self.out_state_folder}/{file_pattern}.csv")
+
+        return files, csv_files
+
+    def delete_csv(
+        self,
+    ) -> None:
+        """
+        Delete the csv file for single step restart.
+        """
+        _, csv_files = self.read_restart_files()
+        file = glob.glob(f"{self.out_state_folder}/{self._i_state:03d}-*.csv")
+        if len(file) != 0:
+            logger.debug(f"Deleting csv file {file[0]}")
+            os.remove(file[0])
+
     def _restart(self) -> None:
         """
         Continue the simulation from the previous state.
         """
-        if self.sim_settings["continue"]:
-            file_pattern = "[0-9][0-9][0-9]-*"
-            files = glob.glob(file_pattern + ".xyz", root_dir=self.out_state_folder)
-            csv_files = glob.glob(f"{self.out_state_folder}/{file_pattern}.csv")
+
+        files, csv_files = self.read_restart_files()
 
         if len(csv_files) != len(files):
             raise RuntimeError(
@@ -259,12 +279,17 @@ class VoltageProfile(BaseSimulation):
             logger.info("No files found for restarting. Volta profile will start from scratch.")
             self._scratch()
         else:
-            if len(files) == 1:  # if there is only one state, restart will begin at this state
+            if len(files) == 1:  # if there is only one state, restart will continue from the next state
+                logger.warning(
+                    "There is only one state found, calculation will continue from the next state. Make sure that the state you provide is complete."
+                )
                 _file = max(files, key=lambda x: int(x[:3]))
             else:  # otherwide, restart will begin at the previous found state
                 _max = max(files, key=lambda x: int(x[:3]))
                 files.remove(_max)
                 _file = max(files, key=lambda x: int(x[:3]))
+                _max_csv_file = max(csv_files, key=lambda x: int(x.split("/")[-1].split("-")[0]))
+                os.remove(_max_csv_file)
             logger.info(f"Continuing volta profile from {_file}")
             self.saved_state_files.extend(csv_files)
             self.state_0 = read(self.out_state_folder + "/" + _file)
@@ -791,14 +816,67 @@ class VoltageProfile(BaseSimulation):
         """
         Compute convex hull and voltage profile out of the already existing state files
         """
-        csv_file_pattern = f"{self.out_state_folder}/[0-9][0-9][0-9]-*.csv"
-        csv_files = glob.glob(csv_file_pattern)
+        files, csv_files = self.read_restart_files()
         if len(csv_files) == self.n_states:
             self.saved_state_files.extend(csv_files)
         else:
             raise RuntimeError(
-                f"The number of csv files found is {len(csv_files)}. However, {self.n_state} states are expected"
+                f"The number of csv files found is {len(csv_files)}. However, {self.n_states} states are expected"
             )
+
+    def do_single_step(self):
+        """
+        Find best atoms to remove for a single step
+        """
+        self._i_state = self.sim_settings["id_single_step"]
+        if self._i_state > self.n_states - 1:
+            raise RuntimeError(
+                f"Step id: {self._i_state} is larger than the number of states {self.n_states -1}. Please choose a valid state."
+            )
+        if self.sim_settings["removal_method"] == "brute_force":
+            num_Li_to_be_removed = self._i_state
+            logger.info(
+                f"Find the lowest energy configuration when removing {num_Li_to_be_removed} Li atoms by brute force"
+            )
+            system = self.system.copy()
+            self.delete_csv()  # delete the csv file for the step to restart
+            self._remove(system, num_Li_to_be_removed)
+        elif self.sim_settings["removal_method"] == "semi_brute_force":
+            num_Li_to_be_removed = 1
+            logger.info(
+                f"Find the lowest energy configuration when removing one Li atoms in step {self._i_state} by semi brute force"
+            )
+            # files, csv_files = self.read_restart_files()
+            # files_sorted = sorted(files,  key=lambda x: int(x.split('-')[0]))
+            restart_file = glob.glob(f"{self.out_state_folder}/{self._i_state - 1:03d}-*.xyz")
+            self.delete_csv()  # delete the csv file for the step to restart
+            # logger.debug(f"reading system {files_sorted[self._i_state -1]}")
+            # add if statement to check if the file doesnot contain any Li atom to be removed
+            # system = read(self.out_state_folder+"/"+files_sorted[self._i_state -1])
+            if len(restart_file) == 0:
+                logger.error(f"No restart file found for step {self._i_state}")
+                raise RuntimeError(f"No restart file found for step {self._i_state}")
+            logger.debug(f"Reading system {restart_file[0]}")
+            system = read(restart_file[0])
+            self._remove(system, num_Li_to_be_removed)
+        else:
+            raise RuntimeError("only brute_force and semi_brute_force methods are implemented.")
+
+        logger.info("DONE!")
+
+    def post_process(self):
+        """
+        Convex hull and voltage
+        """
+        logger.info("Computing Convex Hull")
+        self._voltage_calculator = VoltageCalculator(
+            self.saved_state_files, self.element, self.chemical_potential, self._charge_carried
+        )
+        self.compute_convexhull()
+        self.write_convexhull()
+        logger.info("Computing Voltage steps")
+        self.compute_voltage_profile()
+        self.write_voltage()
 
     def run(self):
         """
@@ -808,35 +886,28 @@ class VoltageProfile(BaseSimulation):
         """
         self.warmup()
 
-        # Find the lowest energy for a specific state
-        if isinstance(self.sim_settings["do_step"], int):
-            system = self.system.copy()
-            self._i_state = self.sim_settings["do_step"]
-            num_Li_to_be_removed = self.sim_settings["do_step"]
-            logger.info(
-                "Find the lowest energy configuration when removing {num_Li_to_be_removed} Li atoms (Brute force)"
-            )
-            self._remove(system, num_Li_to_be_removed)
-            logger.info("DONE!")
-
-        else:
-            # Assuming you have all the state csv files, find the convex hull
-            if self.sim_settings["convex_hull"]:
-                logger.info("Computing Convex Hull")
+        if self.sim_settings["continue"] is False:
+            self._scratch()
+            self.post_process()
+        elif self.sim_settings["continue"] is True:
+            # Restart from last found state
+            self._restart()
+            self.post_process()
+        elif self.sim_settings["continue"].upper() == "CUSTOM":
+            logger.info("Continuing simulation with custom settings")
+            if isinstance(self.sim_settings["id_single_step"], int):
+                logger.info(f"Continuing simulation with single step {self.sim_settings['id_single_step']}")
+                # Find the lowest energy for a specific state
+                self.do_single_step()
+            if self.sim_settings["only_post_process"] is True:
+                logger.debug("Post processing")
+                # Assuming you have all the state csv files, find the convex hull
                 self._restart_convex_hull()
-            elif self.sim_settings["continue"]:  # Restart from last found state
-                self._restart()
-            else:
-                self._scratch()
-
-            logger.info("Computing Convex Hull")
-            self._voltage_calculator = VoltageCalculator(
-                self.saved_state_files, self.element, self.chemical_potential, self._charge_carried
+                self.post_process()
+        else:
+            raise ValueError(
+                f"Unknown continue option {self.sim_settings['continue']}, choose from False, True or CUSTOM"
             )
-            self.compute_convexhull()
-            self.write_convexhull()
-            logger.info("Computing Voltage steps")
-            self.compute_voltage_profile()
-            self.write_voltage()
-            logger.info(" END ".center(120, "="))
-            self.print_report()
+
+        logger.info(" END ".center(120, "="))
+        self.print_report()

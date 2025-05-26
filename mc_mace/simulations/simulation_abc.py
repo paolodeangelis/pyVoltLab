@@ -57,7 +57,7 @@ def create_out_folders(sim_settings: dict[str, Any]) -> None:
                 create_folder_with_backup(out_folder, cont=True)
             else:
                 if out_folder is not None:
-                    create_folder_with_backup(out_folder)
+                    create_folder_with_backup(out_folder, cont=False)
                 else:
                     logger.warning(f"missing `{k}` folder name in input file")
         except KeyError:
