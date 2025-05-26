@@ -846,13 +846,8 @@ class VoltageProfile(BaseSimulation):
             logger.info(
                 f"Find the lowest energy configuration when removing one Li atoms in step {self._i_state} by semi brute force"
             )
-            # files, csv_files = self.read_restart_files()
-            # files_sorted = sorted(files,  key=lambda x: int(x.split('-')[0]))
             restart_file = glob.glob(f"{self.out_state_folder}/{self._i_state - 1:03d}-*.xyz")
             self.delete_csv()  # delete the csv file for the step to restart
-            # logger.debug(f"reading system {files_sorted[self._i_state -1]}")
-            # add if statement to check if the file doesnot contain any Li atom to be removed
-            # system = read(self.out_state_folder+"/"+files_sorted[self._i_state -1])
             if len(restart_file) == 0:
                 logger.error(f"No restart file found for step {self._i_state}")
                 raise RuntimeError(f"No restart file found for step {self._i_state}")

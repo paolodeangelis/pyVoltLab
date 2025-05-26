@@ -93,7 +93,7 @@ def create_file_with_backup(file_path: str | Path) -> None:
         raise
 
 
-def create_folder_with_backup(folder_path: str | Path, cont: False) -> None:
+def create_folder_with_backup(folder_path: str | Path, cont: bool = False) -> None:
     """
     Create a folder. If the folder already exists, create a backup by renaming
     it with a timestamp and then create a new empty folder.
