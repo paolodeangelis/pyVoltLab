@@ -507,7 +507,7 @@ class VoltageProfile(BaseSimulation):
     def _state_file_header(self, file_path: str | Path) -> None:
         append_line_to_file(
             file_path,
-            f"{'step'},{'energy'},{'volume'},{'atoms'}",
+            f"{'atoms_id'},{'energy'},{'volume'},{'atoms'}",
         )
 
     @profiler_io.track
@@ -824,38 +824,45 @@ class VoltageProfile(BaseSimulation):
                 f"The number of csv files found is {len(csv_files)}. However, {self.n_states} states are expected"
             )
 
-    def do_single_step(self):
+    def do_custom_steps(self):
         """
-        Find best atoms to remove for a single step
+        Find best atoms to remove for specific steps
         """
-        self._i_state = self.sim_settings["id_single_step"]
-        if self._i_state > self.n_states - 1:
-            raise RuntimeError(
-                f"Step id: {self._i_state} is larger than the number of states {self.n_states -1}. Please choose a valid state."
-            )
-        if self.sim_settings["removal_method"] == "brute_force":
-            num_Li_to_be_removed = self._i_state
-            logger.info(
-                f"Find the lowest energy configuration when removing {num_Li_to_be_removed} Li atoms by brute force"
-            )
-            system = self.system.copy()
-            self.delete_csv()  # delete the csv file for the step to restart
-            self._remove(system, num_Li_to_be_removed)
-        elif self.sim_settings["removal_method"] == "semi_brute_force":
-            num_Li_to_be_removed = 1
-            logger.info(
-                f"Find the lowest energy configuration when removing one Li atoms in step {self._i_state} by semi brute force"
-            )
-            restart_file = glob.glob(f"{self.out_state_folder}/{self._i_state - 1:03d}-*.xyz")
-            self.delete_csv()  # delete the csv file for the step to restart
-            if len(restart_file) == 0:
-                logger.error(f"No restart file found for step {self._i_state}")
-                raise RuntimeError(f"No restart file found for step {self._i_state}")
-            logger.debug(f"Reading system {restart_file[0]}")
-            system = read(restart_file[0])
-            self._remove(system, num_Li_to_be_removed)
-        else:
-            raise RuntimeError("only brute_force and semi_brute_force methods are implemented.")
+        if isinstance(self.sim_settings["steps_id"], int):
+            self.sim_settings["steps_id"] = [self.sim_settings["steps_id"]]
+        for self._i_state in self.sim_settings["steps_id"]:
+            if self._i_state > self.n_states - 1:
+                raise RuntimeError(
+                    f"Step id: {self._i_state} is larger than the number of states {self.n_states -1}. Please choose a valid state."
+                )
+            if self.sim_settings["removal_method"] == "brute_force":
+                num_Li_to_be_removed = self._i_state
+                logger.info(
+                    f"Find the lowest energy configuration when removing {num_Li_to_be_removed} Li atoms by brute force"
+                )
+                system = self.system.copy()
+                logger.info(f" Remove {self._i_state} {self.working_ion} atoms from {system}".center(120, "-"))
+                self.delete_csv()  # delete the csv file for the step to restart
+                self._remove(system, num_Li_to_be_removed)
+            elif self.sim_settings["removal_method"] == "semi_brute_force":
+                num_Li_to_be_removed = 1
+                logger.info(
+                    f"Find the lowest energy configuration when removing one Li atoms in step {self._i_state} by semi brute force"
+                )
+                if self._i_state == 0:
+                    system = self.system.copy()
+                    num_Li_to_be_removed = 0
+                else:
+                    restart_file = glob.glob(f"{self.out_state_folder}/{self._i_state - 1:03d}-*.xyz")
+                    self.delete_csv()  # delete the csv file for the step to restart
+                    if len(restart_file) == 0:
+                        logger.error(f"No restart file found for step {self._i_state}")
+                        raise RuntimeError(f"No restart file found for step {self._i_state}")
+                    logger.debug(f"Reading system {restart_file[0]}")
+                    system = read(restart_file[0])
+                self._remove(system, num_Li_to_be_removed)
+            else:
+                raise RuntimeError("only brute_force and semi_brute_force methods are implemented.")
 
         logger.info("DONE!")
 
@@ -890,11 +897,11 @@ class VoltageProfile(BaseSimulation):
             self.post_process()
         elif self.sim_settings["continue"].upper() == "CUSTOM":
             logger.info("Continuing simulation with custom settings")
-            if isinstance(self.sim_settings["id_single_step"], int):
-                logger.info(f"Continuing simulation with single step {self.sim_settings['id_single_step']}")
+            if isinstance(self.sim_settings["steps_id"], (int, list)):
+                logger.info(f"Continuing simulation with custom step/s {self.sim_settings['steps_id']}")
                 # Find the lowest energy for a specific state
-                self.do_single_step()
-            if self.sim_settings["only_post_process"] is True:
+                self.do_custom_steps()
+            if self.sim_settings["post_process"] is True:
                 logger.debug("Post processing")
                 # Assuming you have all the state csv files, find the convex hull
                 self._restart_convex_hull()

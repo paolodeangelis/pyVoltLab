@@ -20,8 +20,8 @@ DEFAULTS_MACE = {
         "convex hull": "convexhull.csv",
     },
     "states folder": "states",
-    "id_single_step": None,
-    "only_post_process": False,
+    "steps_id": None,
+    "post_process": False,
 }
 
 # List of required parameters
@@ -67,8 +67,8 @@ DEFAULTS_DFT = {
     },
     "states folder": "states",
     "QE_dir": "QE",
-    "id_single_step": None,
-    "only_post_process": False,
+    "steps_id": None,
+    "post_process": False,
 }
 
 # List of required parameters
