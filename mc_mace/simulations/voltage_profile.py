@@ -308,7 +308,7 @@ class VoltageProfile(BaseSimulation):
 
     def _continue_interrupted_step(self, xyz_file, csv_file) -> None:
         """
-        restart from last interrupted step
+        restart the last interrupted step
         """
         data = pd.read_csv(csv_file, header=None, skiprows=1)
 
@@ -910,6 +910,19 @@ class VoltageProfile(BaseSimulation):
 
         logger.info("DONE!")
 
+    def _finish_interrupted_step(self) -> None:
+        """
+        Continue custome method to only finish the last interrupted step.
+        """
+        files, csv_files = self.read_restart_files()
+        if len(csv_files) == 0:
+            raise RuntimeError("No state files found to continue the simulation")
+
+        _max_xyz_file = max(files, key=lambda x: int(x[:3]))
+        _max_csv_file = max(csv_files, key=lambda x: int(x.split("/")[-1].split("-")[0]))
+        self._i_state = int(_max_xyz_file[:3])
+        self._continue_interrupted_step(_max_xyz_file, _max_csv_file)
+
     def post_process(self):
         """
         Convex hull and voltage
@@ -941,12 +954,15 @@ class VoltageProfile(BaseSimulation):
             self.post_process()
         elif self.sim_settings["continue"].upper() == "CUSTOM":
             logger.info("Continuing simulation with custom settings")
+            if self.sim_settings["finish_interrupted_step"] is True:
+                logger.info("CUSTOM: Finish last interrupted step")
+                self._finish_interrupted_step()
             if isinstance(self.sim_settings["steps_id"], (int, list)):
-                logger.info(f"Continuing simulation with custom step/s {self.sim_settings['steps_id']}")
+                logger.info(f"CUSTOM: Continuing simulation with custom step/s {self.sim_settings['steps_id']}")
                 # Find the lowest energy for a specific state
                 self.do_custom_steps()
             if self.sim_settings["post_process"] is True:
-                logger.debug("Post processing")
+                logger.debug("CUSTOM: Post processing")
                 # Assuming you have all the state csv files, find the convex hull
                 self._restart_convex_hull()
                 self.post_process()

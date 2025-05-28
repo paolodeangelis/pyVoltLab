@@ -22,6 +22,7 @@ DEFAULTS_MACE = {
     "states folder": "states",
     "steps_id": None,
     "post_process": False,
+    "finish_interrupted_step": False,
 }
 
 # List of required parameters
@@ -69,6 +70,7 @@ DEFAULTS_DFT = {
     "QE_dir": "QE",
     "steps_id": None,
     "post_process": False,
+    "finish_interrupted_step": False,
 }
 
 # List of required parameters
