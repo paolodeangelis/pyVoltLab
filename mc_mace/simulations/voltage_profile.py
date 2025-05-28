@@ -313,23 +313,20 @@ class VoltageProfile(BaseSimulation):
         data = pd.read_csv(csv_file, header=None, skiprows=1)
 
         if self.sim_settings["removal_method"] == "brute_force":
-            id_done = data.iloc[:, 0 : self._i_state].values.tolist()
-            id_done = {tuple(comb) for comb in id_done}  # Convert to set of tuples for faster lookup
+            # Read atom indices that have been already removed
+            # Use tuples for faster comparison between done vs to be done combinations
+            id_done = {tuple(map(int, comb)) for comb in data.iloc[:, 0 : self._i_state].values}
             logger.debug(f"Atoms done: {id_done}")
             system = self.system.copy()
             num_Li_to_be_removed = self._i_state
             atom_indices = np.where(system.get_atomic_numbers() == atomic_numbers[self.element])[0]
-            atom_to_remove = list(combinations(atom_indices, num_Li_to_be_removed))
-            # Convert numpy.int64 to Python int (cleaner representation)
-            atom_to_remove = [tuple(map(int, combo)) for combo in atom_to_remove]
-            atom_to_remove = [comb for comb in atom_to_remove if tuple(comb) not in id_done]  # remove done atoms
-            atom_to_remove = [
-                list(np.array(combo, dtype=np.int64)) for combo in atom_to_remove
-            ]  # Convert tuples back to lists for compatibility with ASE
-            # logger.debug(f"Continuing volta profile from {xyz_file}. Attempts to remove atoms {id_done}  have already been done")
-            # logger.debug(f"Next attempt to remove the following atoms: {atom_to_remove}")
-            for atom in atom_to_remove:
-                self._remove(system, num_Li_to_be_removed, atom)
+
+            # Generate all combinations of atom indices to remove
+            # And check if the combination has already been done
+            for combo in combinations(atom_indices, self._i_state):
+                if tuple(map(int, combo)) not in id_done:  # Compare as tuples of ints
+                    self._remove(system, self._i_state, list(combo))
+
         elif self.sim_settings["removal_method"] == "semi_brute_force":
             id_done = data.iloc[:, 0].values.astype(int)
             logger.debug(f"Atoms done: {id_done}")
@@ -886,7 +883,7 @@ class VoltageProfile(BaseSimulation):
                 )
                 system = self.system.copy()
                 atom_to_remove = np.where(system.get_atomic_numbers() == atomic_numbers[self.element])[0]
-                logger.info(f" Remove {self._i_state} {self.working_ion} atoms from {system}".center(120, "-"))
+                logger.info(f" Remove {self._i_state} {self.element} atoms from {system}".center(120, "-"))
                 self.delete_csv()  # delete the csv file for the step to restart
                 self._remove(system, num_Li_to_be_removed, atom_to_remove)
             elif self.sim_settings["removal_method"] == "semi_brute_force":
