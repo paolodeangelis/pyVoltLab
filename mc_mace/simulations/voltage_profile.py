@@ -283,6 +283,10 @@ class VoltageProfile(BaseSimulation):
             _max_xyz_file = max(files, key=lambda x: int(x[:3]))
             _max_csv_file = max(csv_files, key=lambda x: int(x.split("/")[-1].split("-")[0]))
 
+            self._i_state = int(_max_xyz_file[:3])
+            if self._i_state == self.n_states - 1:
+                raise RuntimeError("Last state found, no more states to compute.")
+
             if len(files) == 1:  # if there is only one state, restart will continue from the next state
                 logger.warning(
                     "There is only one state found, calculation will continue from the next state. Make sure that the state you provide is complete."
@@ -292,7 +296,6 @@ class VoltageProfile(BaseSimulation):
                 files.remove(_max_xyz_file)
                 _file = max(files, key=lambda x: int(x[:3]))
 
-            self._i_state = int(_max_xyz_file[:3])
             self._continue_interrupted_step(_file, _max_csv_file)
 
             logger.debug(f"Continuing volta profile from {_max_xyz_file}")
@@ -334,7 +337,11 @@ class VoltageProfile(BaseSimulation):
             num_Li_to_be_removed = 1
             atom_to_remove = np.where(system.get_atomic_numbers() == atomic_numbers[self.element])[0]
             atom_to_remove = np.setdiff1d(atom_to_remove, id_done)  # remove done atoms
-            self._remove(system, num_Li_to_be_removed, atom_to_remove)
+            if len(atom_to_remove) == 0:
+                logger.warning("No atoms to remove, skipping this step.")
+                return
+            else:
+                self._remove(system, num_Li_to_be_removed, atom_to_remove)
         else:
             logger.error(f"Unsupported removal method {self.sim_settings['removal_method']}")
             raise ValueError(f"Unsupported removal method {self.sim_settings['removal_method']}")
