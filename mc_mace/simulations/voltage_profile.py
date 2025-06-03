@@ -338,7 +338,7 @@ class VoltageProfile(BaseSimulation):
             atom_to_remove = np.where(system.get_atomic_numbers() == atomic_numbers[self.element])[0]
             atom_to_remove = np.setdiff1d(atom_to_remove, id_done)  # remove done atoms
             if len(atom_to_remove) == 0:
-                logger.warning("No atoms to remove, skipping this step.")
+                logger.warning("No atoms to remove, moving to the next step.")
                 return
             else:
                 self._remove(system, num_Li_to_be_removed, atom_to_remove)
