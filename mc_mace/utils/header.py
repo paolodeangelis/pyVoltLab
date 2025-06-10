@@ -48,7 +48,7 @@ def print_header(output: TextIO | None = sys.stdout) -> None:
     print(version_line, file=output)
     print("", file=output)  # Add a blank line
     print(
-        " " * 30 + f"(c) {__year__}, {__authors__[0]['name']}".ljust(60, " "),
+        " " * 30 + f"(c) {__year__}, {__authors__[0]['name']}, {__authors__[1]['name']}".ljust(60, " "),
         file=output,
     )
     print(
@@ -58,7 +58,7 @@ def print_header(output: TextIO | None = sys.stdout) -> None:
     print(" " * 30 + "Author(s):".ljust(60, " "), file=output)
     for author in __authors__:
         print(
-            " " * 30 + f"    {__authors__[0]['name']} ({__authors__[0]['email']})".ljust(60, " "),
+            " " * 30 + f"    {author['name']} ({author['email']})".ljust(60, " "),
             file=output,
         )
     print("", file=output)  # Add a blank line

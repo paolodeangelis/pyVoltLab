@@ -20,6 +20,9 @@ DEFAULTS_MACE = {
         "convex hull": "convexhull.csv",
     },
     "states folder": "states",
+    "steps_id": None,
+    "post_process": False,
+    "finish_interrupted_step": False,
 }
 
 # List of required parameters
@@ -35,7 +38,7 @@ DEFAULTS_DFT = {
     "outdir": "./tmp",
     "prefix": "pwscf",
     "max_seconds": 82800,  # 23 hours
-    "nstep": 5000,
+    "nstep": 1000,
     "tstress": True,
     "tprnfor": True,
     "etot_conv_thr": 1e-5,  # pwscf default = 1e-4
@@ -65,6 +68,9 @@ DEFAULTS_DFT = {
     },
     "states folder": "states",
     "QE_dir": "QE",
+    "steps_id": None,
+    "post_process": False,
+    "finish_interrupted_step": False,
 }
 
 # List of required parameters

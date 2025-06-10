@@ -186,7 +186,7 @@ class VoltageProfile(BaseSimulation):
 
     def __logger_prefix(self) -> str:
         try:
-            prefix = "[" + f"State {self._i_state:d}/{self.n_states:d}".center(19, " ") + "] "
+            prefix = "[" + f"State {self._i_state:d}/{self.n_states -1:d}".center(19, " ") + "] "
         except AttributeError:
             prefix = ""
         return prefix
@@ -242,15 +242,34 @@ class VoltageProfile(BaseSimulation):
             pseudo_dir=pseudo_dir,
         )
 
+    def read_restart_files(self):
+        """
+        Read the csv and xyz file for restart
+        """
+        file_pattern = "[0-9][0-9][0-9]-*"
+        files = glob.glob(file_pattern + ".xyz", root_dir=self.out_state_folder)
+        csv_files = glob.glob(f"{self.out_state_folder}/{file_pattern}.csv")
+
+        return files, csv_files
+
+    def delete_csv(
+        self,
+    ) -> None:
+        """
+        Delete the csv file for single step restart.
+        """
+        _, csv_files = self.read_restart_files()
+        file = glob.glob(f"{self.out_state_folder}/{self._i_state:03d}-*.csv")
+        if len(file) != 0:
+            logger.debug(f"Deleting csv file {file[0]}")
+            os.remove(file[0])
+
     def _restart(self) -> None:
         """
         Continue the simulation from the previous state.
         """
-        if self.sim_settings["continue"]:
-            file_pattern = "[0-9][0-9][0-9]-*.xyz"
-            files = glob.glob(file_pattern, root_dir=self.out_state_folder)
-            csv_file_pattern = f"{self.out_state_folder}/[0-9][0-9][0-9]-*.csv"
-            csv_files = glob.glob(csv_file_pattern)
+
+        files, csv_files = self.read_restart_files()
 
         if len(csv_files) != len(files):
             raise RuntimeError(
@@ -260,16 +279,72 @@ class VoltageProfile(BaseSimulation):
             logger.info("No files found for restarting. Volta profile will start from scratch.")
             self._scratch()
         else:
-            _file = max(files, key=lambda x: int(x[:3]))
-            logger.info(f"Continuing volta profile from {_file}")
+
+            _max_xyz_file = max(files, key=lambda x: int(x[:3]))
+            _max_csv_file = max(csv_files, key=lambda x: int(x.split("/")[-1].split("-")[0]))
+
+            self._i_state = int(_max_xyz_file[:3])
+            if self._i_state == self.n_states - 1:
+                raise RuntimeError("Last state found, no more states to compute.")
+
+            if len(files) == 1:  # if there is only one state, restart will continue from the next state
+                logger.warning(
+                    "There is only one state found, calculation will continue from the next state. Make sure that the state you provide is complete."
+                )
+                _file = _max_xyz_file
+            else:  # otherwide, restart will begin at the previous found state
+                files.remove(_max_xyz_file)
+                _file = max(files, key=lambda x: int(x[:3]))
+
+            self._continue_interrupted_step(_file, _max_csv_file)
+
+            logger.debug(f"Continuing volta profile from {_max_xyz_file}")
             self.saved_state_files.extend(csv_files)
-            self.state_0 = read(self.out_state_folder + "/" + _file)
-            cont_state = int(_file[:3])
+            self.state_0 = read(self.out_state_folder + "/" + _max_xyz_file)
+
+            cont_state = int(_max_xyz_file[:3])
             for self._i_state in range(cont_state + 1, self.n_states):
                 _energy = self._find_atom_to_remove()
 
                 self.update_files(_energy)
                 self.update_states()
+
+    def _continue_interrupted_step(self, xyz_file, csv_file) -> None:
+        """
+        restart the last interrupted step
+        """
+        data = pd.read_csv(csv_file, header=None, skiprows=1)
+
+        if self.sim_settings["removal_method"] == "brute_force":
+            # Read atom indices that have been already removed
+            # Use tuples for faster comparison between done vs to be done combinations
+            id_done = {tuple(map(int, comb)) for comb in data.iloc[:, 0 : self._i_state].values}
+            logger.debug(f"Atoms done: {id_done}")
+            system = self.system.copy()
+            num_Li_to_be_removed = self._i_state
+            atom_indices = np.where(system.get_atomic_numbers() == atomic_numbers[self.element])[0]
+
+            # Generate all combinations of atom indices to remove
+            # And check if the combination has already been done
+            for combo in combinations(atom_indices, self._i_state):
+                if tuple(map(int, combo)) not in id_done:  # Compare as tuples of ints
+                    self._remove(system, self._i_state, list(combo))
+
+        elif self.sim_settings["removal_method"] == "semi_brute_force":
+            id_done = data.iloc[:, 0].values.astype(int)
+            logger.debug(f"Atoms done: {id_done}")
+            system = read(self.out_state_folder + "/" + xyz_file)
+            num_Li_to_be_removed = 1
+            atom_to_remove = np.where(system.get_atomic_numbers() == atomic_numbers[self.element])[0]
+            atom_to_remove = np.setdiff1d(atom_to_remove, id_done)  # remove done atoms
+            if len(atom_to_remove) == 0:
+                logger.warning("No atoms to remove, moving to the next step.")
+                return
+            else:
+                self._remove(system, num_Li_to_be_removed, atom_to_remove)
+        else:
+            logger.error(f"Unsupported removal method {self.sim_settings['removal_method']}")
+            raise ValueError(f"Unsupported removal method {self.sim_settings['removal_method']}")
 
     def _scratch(self) -> None:
         """
@@ -478,7 +553,7 @@ class VoltageProfile(BaseSimulation):
     def _state_file_header(self, file_path: str | Path) -> None:
         append_line_to_file(
             file_path,
-            f"{'step'},{'energy'},{'volume'},{'atoms'}",
+            f"{'atoms_id'},{'energy'},{'volume'},{'atoms'}",
         )
 
     @profiler_io.track
@@ -501,7 +576,8 @@ class VoltageProfile(BaseSimulation):
             formula = atoms.get_chemical_formula(mode="hill", empirical=False)
             files = glob.glob(os.path.join(str(self.out_state_folder), f"*-{formula}.csv"))
             if len(files) < 1:
-                id = len(glob.glob(os.path.join(str(self.out_state_folder), "*.csv")))
+                # id = len(glob.glob(os.path.join(str(self.out_state_folder), "*.csv")))
+                id = self._i_state
                 file_path = os.path.join(str(self.out_state_folder), f"{id:03d}-{formula}.csv")
                 self.saved_state_files.append(file_path)
                 self._state_file_header(file_path)
@@ -595,15 +671,17 @@ class VoltageProfile(BaseSimulation):
         if self.sim_settings["removal_method"] == "brute_force":
             logger.info("Brute force method")
             system = self.system.copy()
+            atom_to_remove = np.where(system.get_atomic_numbers() == atomic_numbers[self.element])[0]
             num_Li_to_be_removed = self.n_states - len(
                 np.where(self.state_0.get_atomic_numbers() == atomic_numbers[self.element])[0]
             )
-            return self._remove(system, num_Li_to_be_removed)
+            return self._remove(system, num_Li_to_be_removed, atom_to_remove)
         elif self.sim_settings["removal_method"] == "semi_brute_force":
             logger.info("Semi brute force method")
             system = self.state_0.copy()
+            atom_to_remove = np.where(system.get_atomic_numbers() == atomic_numbers[self.element])[0]
             num_Li_to_be_removed = 1
-            return self._remove(system, num_Li_to_be_removed)
+            return self._remove(system, num_Li_to_be_removed, atom_to_remove)
         elif self.sim_settings["removal_method"] == "genetic":
             logger.info("Genetic algorithm method")
             raise NotImplementedError("Genetic algorithm not implemented")
@@ -611,7 +689,7 @@ class VoltageProfile(BaseSimulation):
             logger.info("Cluster expansion method not implemented yet")
             raise NotImplementedError("Cluster expansion not implemented")
 
-    def _remove(self, system: Atoms, num_Li_to_be_removed: int):
+    def _remove(self, system: Atoms, num_Li_to_be_removed: int, atom_to_remove: np.array):
         """
         Identify the atom to remove by computing energy differences.
 
@@ -622,7 +700,7 @@ class VoltageProfile(BaseSimulation):
         min_energy = float("inf")
         best = None
         best_ai = None
-        atom_to_remove = np.where(system.get_atomic_numbers() == atomic_numbers[self.element])[0]
+        # atom_to_remove = np.where(system.get_atomic_numbers() == atomic_numbers[self.element])[0]
         logger.info(
             self.__logger_prefix() + f"Removing {num_Li_to_be_removed} atom from system {system.get_chemical_formula()}"
         )
@@ -636,8 +714,8 @@ class VoltageProfile(BaseSimulation):
             )
             tag = ""
             for val in self._ai:
-                tag += str(val)
-            self._set_calculator(tag + "_" + self.state_1.get_chemical_formula())
+                tag += str(val) + "_"
+            self._set_calculator(tag + self.state_1.get_chemical_formula())
             self.state_1.calc = self.calculator
             energy_start = self._get_potential_energy_new_state()
             logger.debug(f"Optimizing system {self.state_1.get_chemical_formula()}")
@@ -782,19 +860,80 @@ class VoltageProfile(BaseSimulation):
         self._voltage_calculator.write_voltage(self.out_voltage)
         logger.info(f"Save file {self.out_voltage}")
 
-    def run(self):
+    def _restart_convex_hull(self):
         """
-        Run the simulation to compute the voltage profile.
-
-        Iteratively remove atoms and compute the energy change to determine the voltage profile.
+        Compute convex hull and voltage profile out of the already existing state files
         """
-        self.warmup()
-
-        if self.sim_settings["continue"]:
-            self._restart()
+        files, csv_files = self.read_restart_files()
+        if len(csv_files) == self.n_states:
+            self.saved_state_files.extend(csv_files)
         else:
-            self._scratch()
+            raise RuntimeError(
+                f"The number of csv files found is {len(csv_files)}. However, {self.n_states} states are expected"
+            )
 
+    def do_custom_steps(self):
+        """
+        Find best atoms to remove for specific steps
+        """
+        if isinstance(self.sim_settings["steps_id"], int):
+            self.sim_settings["steps_id"] = [self.sim_settings["steps_id"]]
+        for self._i_state in self.sim_settings["steps_id"]:
+            if self._i_state > self.n_states - 1:
+                raise RuntimeError(
+                    f"Step id: {self._i_state} is larger than the number of states {self.n_states -1}. Please choose a valid state."
+                )
+            if self.sim_settings["removal_method"] == "brute_force":
+                num_Li_to_be_removed = self._i_state
+                logger.info(
+                    f"Find the lowest energy configuration when removing {num_Li_to_be_removed} Li atoms by brute force"
+                )
+                system = self.system.copy()
+                atom_to_remove = np.where(system.get_atomic_numbers() == atomic_numbers[self.element])[0]
+                logger.info(f" Remove {self._i_state} {self.element} atoms from {system}".center(120, "-"))
+                self.delete_csv()  # delete the csv file for the step to restart
+                self._remove(system, num_Li_to_be_removed, atom_to_remove)
+            elif self.sim_settings["removal_method"] == "semi_brute_force":
+                num_Li_to_be_removed = 1
+                logger.info(
+                    f"Find the lowest energy configuration when removing one Li atoms in step {self._i_state} by semi brute force"
+                )
+                if self._i_state == 0:
+                    system = self.system.copy()
+                    atom_to_remove = np.where(system.get_atomic_numbers() == atomic_numbers[self.element])[0]
+                    num_Li_to_be_removed = 0
+                else:
+                    restart_file = glob.glob(f"{self.out_state_folder}/{self._i_state - 1:03d}-*.xyz")
+                    self.delete_csv()  # delete the csv file for the step to restart
+                    if len(restart_file) == 0:
+                        logger.error(f"No restart file found for step {self._i_state}")
+                        raise RuntimeError(f"No restart file found for step {self._i_state}")
+                    logger.debug(f"Reading system {restart_file[0]}")
+                    system = read(restart_file[0])
+                    atom_to_remove = np.where(system.get_atomic_numbers() == atomic_numbers[self.element])[0]
+                self._remove(system, num_Li_to_be_removed, atom_to_remove)
+            else:
+                raise RuntimeError("only brute_force and semi_brute_force methods are implemented.")
+
+        logger.info("DONE!")
+
+    def _finish_interrupted_step(self) -> None:
+        """
+        Continue custome method to only finish the last interrupted step.
+        """
+        files, csv_files = self.read_restart_files()
+        if len(csv_files) == 0:
+            raise RuntimeError("No state files found to continue the simulation")
+
+        _max_xyz_file = max(files, key=lambda x: int(x[:3]))
+        _max_csv_file = max(csv_files, key=lambda x: int(x.split("/")[-1].split("-")[0]))
+        self._i_state = int(_max_xyz_file[:3])
+        self._continue_interrupted_step(_max_xyz_file, _max_csv_file)
+
+    def post_process(self):
+        """
+        Convex hull and voltage
+        """
         logger.info("Computing Convex Hull")
         self._voltage_calculator = VoltageCalculator(
             self.saved_state_files, self.element, self.chemical_potential, self._charge_carried
@@ -804,5 +943,40 @@ class VoltageProfile(BaseSimulation):
         logger.info("Computing Voltage steps")
         self.compute_voltage_profile()
         self.write_voltage()
+
+    def run(self):
+        """
+        Run the simulation to compute the voltage profile.
+
+        Iteratively remove atoms and compute the energy change to determine the voltage profile.
+        """
+        self.warmup()
+
+        if self.sim_settings["continue"] is False:
+            self._scratch()
+            self.post_process()
+        elif self.sim_settings["continue"] is True:
+            # Restart from last found state
+            self._restart()
+            self.post_process()
+        elif self.sim_settings["continue"].upper() == "CUSTOM":
+            logger.info("Continuing simulation with custom settings")
+            if self.sim_settings["finish_interrupted_step"] is True:
+                logger.info("CUSTOM: Finish last interrupted step")
+                self._finish_interrupted_step()
+            if isinstance(self.sim_settings["steps_id"], (int, list)):
+                logger.info(f"CUSTOM: Continuing simulation with custom step/s {self.sim_settings['steps_id']}")
+                # Find the lowest energy for a specific state
+                self.do_custom_steps()
+            if self.sim_settings["post_process"] is True:
+                logger.debug("CUSTOM: Post processing")
+                # Assuming you have all the state csv files, find the convex hull
+                self._restart_convex_hull()
+                self.post_process()
+        else:
+            raise ValueError(
+                f"Unknown continue option {self.sim_settings['continue']}, choose from False, True or CUSTOM"
+            )
+
         logger.info(" END ".center(120, "="))
         self.print_report()
