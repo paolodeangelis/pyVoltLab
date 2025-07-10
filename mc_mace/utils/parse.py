@@ -8,6 +8,7 @@ from loguru import logger
 DEFAULTS_MACE = {
     "continue": False,
     "removal_method": "semi_brute_force",
+    "plots": True,
     "optimizer": {
         "type": "FIRE2",
         "fmax": 0.05,
@@ -20,9 +21,12 @@ DEFAULTS_MACE = {
         "convex hull": "convexhull.csv",
     },
     "states folder": "states",
+    "plots folder": "plots",
+    "voltage_max": 10.0,  # Maximum voltage in volts
     "steps_id": None,
     "post_process": False,
     "finish_interrupted_step": False,
+    "plot_frequency": 1,
 }
 
 # List of required parameters
@@ -32,6 +36,7 @@ REQUIRED_ENTRIES_MACE = ["system", "working ion", "mace_model"]
 DEFAULTS_DFT = {
     "continue": False,
     "removal_method": "semi_brute_force",
+    "plots": True,
     "calculation": "scf",
     "restart_mode": "from_scratch",
     "verbosity": "low",
@@ -66,11 +71,14 @@ DEFAULTS_DFT = {
         "voltage": "voltage.csv",
         "convex hull": "convexhull.csv",
     },
+    "voltage_max": 10.0,  # Maximum voltage in volts
     "states folder": "states",
+    "plots folder": "plots",
     "QE_dir": "QE",
     "steps_id": None,
     "post_process": False,
     "finish_interrupted_step": False,
+    "plot_frequency": 1,
 }
 
 # List of required parameters
