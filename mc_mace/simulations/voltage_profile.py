@@ -86,12 +86,12 @@ class VoltageCalculator:
             if n_ion < n_min:
                 self._formula_empty = formula_
                 n_min = n_ion
+        logger.debug(
+            f"Full state: {self._formula_full} with # ions: {n_max}, empty state: {self._formula_empty} with # ions: {n_min}, working ion: {self.working_ion} with energy {self.working_ion_energy}"
+        )
         if len(self._state_energy[self._formula_full]) > 1:
             print("Too many energy in full state")
             print(self._state_energy[self._formula_full])
-        print(f"Working ion: {self.working_ion}, energy = {self.working_ion_energy}")
-        print(f"Full state: {self._formula_full}, n_ion = {n_max}")
-        print(f"Empty state: {self._formula_empty}, n_ion = {n_min}")
         self._energy_full = self._state_energy[self._formula_full]
         self._n_ion_max = n_max
         if len(self._state_energy[self._formula_empty]) > 1:
@@ -125,30 +125,24 @@ class VoltageCalculator:
     def get_voltage(self):
         self.voltage_steps = np.zeros((self._stable_points.shape[0] - 1, 3))
         e_full_per_formula = self._energy_full / self.reduce_factor
-        print("reduce_factor = ", self.reduce_factor)
-        print("e_full_per_formula = ", e_full_per_formula)
         e_empty_per_formula = self._energy_empty / self.reduce_factor
-        print("e_empty_per_formula = ", e_empty_per_formula)
-        print("working_ion_energy = ", self.working_ion_energy)
         for i in range(1, self._stable_points.shape[0]):
             x1, e1 = self._stable_points[i - 1]
-            print("x1 = ", x1, ", e1 = ", e1)
             x2, e2 = self._stable_points[i]
-            print("x2 = ", x2, ", e2 = ", e2)
             delta_e = e2 - e1 + (x2 - x1) * (e_full_per_formula - e_empty_per_formula - self.working_ion_energy)
-            print("delta_e = ", delta_e)
             delta_x = x2 - x1
-            print("delta_x = ", delta_x)
             voltage = -delta_e / (delta_x * self.charge_carried)  # Voltage in volts
             if voltage[0] > self.voltage_max:
-                raise ValueError(f"Voltage exceeds the maximum limit {self.voltage_max} V.")
+                raise ValueError(f"Voltage (={voltage[0]}) exceeds the maximum limit of {self.voltage_max} V.")
             # self.voltage_steps.append([float(x1), float(x2), float(voltage)])
             self.voltage_steps[i - 1, :] = [
                 x1,
                 x2,
                 voltage[0],
             ]  # [x1, x2, voltage] #[float(x1), float(x2), float(voltage)]
-            print("i = ", i, ", x1 = ", x1, ", x2 = ", x2, ", voltage = ", voltage[0])
+            logger.debug(
+                f"Stable points: x1 = {x1}, x2 = {x2}, delta_x = {delta_x}, e1 = {e1}, e2 = {e2}, delta_e =  {delta_e}, voltage = {voltage[0]}"
+            )
 
     def write_voltage(self, file_path):
         with open(file_path, "w") as f:
@@ -299,32 +293,35 @@ class VoltageProfile(BaseSimulation):
             if len(files) == self.n_states:
                 raise RuntimeError("Last state found, no more states to compute.")
 
-            elif len(files) == 1:  # in automatic restart, this state must be the initial state
+            elif len(files) == 1:  # in automatic restart, this state must be the initial state (fully intercalated)
                 logger.info("Continue: optimizing the final state")
                 # _file = files[0]
                 self.optimize_last_configuration()
                 self.state_0 = self.system.copy()
                 cont_state = 0
-            elif len(files) == 2:
+            elif (
+                len(files) == 2
+            ):  # in automatic restart, those 2 states must be the initial (fully intercalated) and final states (fully de-intercalated)
                 logger.info("Continue: initial and final state found, starting the de-intercalation process")
                 self.state_0 = self.system.copy()
                 cont_state = 0
-            else:  # otherwide, restart will begin at the previous found state
+            else:  # continue from the last attempt
                 # _max_xyz_file = max(files, key=lambda x: int(x[:3]))
                 sorted_files = sorted(files, key=lambda x: int(x[:3]))
                 _max_xyz_file = sorted_files[-2]
-                print(_max_xyz_file)
                 # _max_csv_file = max(csv_files, key=lambda x: int(x.split("/")[-1].split("-")[0]))
                 sorted_csv_files = sorted(csv_files, key=lambda x: int(x.split("/")[-1].split("-")[0]))
                 _max_csv_file = sorted_csv_files[-2]
-                print(_max_csv_file)
 
                 self._i_state = int(_max_xyz_file[:3])
 
                 # files.remove(_max_xyz_file)
                 # _file = max(files, key=lambda x: int(x[:3]))
                 _file = sorted_files[-3]
-                logger.info("Continue: continue de-intercalation process of step " + str(self._i_state))
+                logger.info(
+                    "Continue: continue de-intercalation process of step " + str(self._i_state),
+                    "starting from state " + _file,
+                )
 
                 self._continue_interrupted_step(_file, _max_csv_file)
                 self.post_process()
