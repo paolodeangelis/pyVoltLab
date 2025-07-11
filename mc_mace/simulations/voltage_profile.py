@@ -47,6 +47,7 @@ class VoltageCalculator:
         self._convexhull = None
         self._stable_points = None
         self.voltage_steps = []
+        self.number_of_ions = 0  # Number of ions in the unit formula
 
     def get_state_energy(self):
         for file_path in self.states_files:
@@ -124,14 +125,21 @@ class VoltageCalculator:
 
     def get_voltage(self):
         self.voltage_steps = np.zeros((self._stable_points.shape[0] - 1, 3))
+        self.number_of_ions = self._n_ion_max / self.reduce_factor
+        logger.debug(f"Number of ions in unit formula: {self.number_of_ions}")
         e_full_per_formula = self._energy_full / self.reduce_factor
         e_empty_per_formula = self._energy_empty / self.reduce_factor
         for i in range(1, self._stable_points.shape[0]):
             x1, e1 = self._stable_points[i - 1]
             x2, e2 = self._stable_points[i]
-            delta_e = e2 - e1 + (x2 - x1) * (e_full_per_formula - e_empty_per_formula - self.working_ion_energy)
+            delta_e = (
+                e2
+                - e1
+                + (x2 - x1)
+                * (e_full_per_formula - e_empty_per_formula - (self.working_ion_energy * self.number_of_ions))
+            )
             delta_x = x2 - x1
-            voltage = -delta_e / (delta_x * self.charge_carried)  # Voltage in volts
+            voltage = -delta_e / (delta_x * self.number_of_ions * self.charge_carried)  # Voltage in volts
             if voltage[0] > self.voltage_max:
                 raise ValueError(f"Voltage (={voltage[0]}) exceeds the maximum limit of {self.voltage_max} V.")
             # self.voltage_steps.append([float(x1), float(x2), float(voltage)])
