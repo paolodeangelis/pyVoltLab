@@ -139,7 +139,7 @@ class VoltageCalculator:
                 * (e_full_per_formula - e_empty_per_formula - (self.working_ion_energy * self.number_of_ions))
             )
             delta_x = x2 - x1
-            voltage = -delta_e / (delta_x * self.charge_carried)  # Voltage in volts
+            voltage = -delta_e / (delta_x * self.number_of_ions * self.charge_carried)  # Voltage in volts
             if voltage[0] > self.voltage_max:
                 raise ValueError(f"Voltage (={voltage[0]}) exceeds the maximum limit of {self.voltage_max} V.")
             # self.voltage_steps.append([float(x1), float(x2), float(voltage)])
@@ -422,14 +422,6 @@ class VoltageProfile(BaseSimulation):
             tag = ""
             for val in self._ai:
                 tag += str(val) + "_"
-            with open(
-                self.sim_settings["QE_dir"] + f"/{tag + self.state_1.get_chemical_formula()}/" + "espresso.pwo"
-            ) as f:
-                for line in f:
-                    if "Begin final coordinates" in line:
-                        break
-                    else:
-                        raise RuntimeError("Optimization did not converge!")
         force_max_start = np.max(np.linalg.norm(self.state_1.get_forces(), axis=1))
         cell_start = self.state_1.cell.cellpar()
         vol_start = self.state_1.cell.volume
@@ -1098,6 +1090,13 @@ class VoltageProfile(BaseSimulation):
                 logger.info(f"CUSTOM: Continuing simulation with custom step/s {self.sim_settings['steps_id']}")
                 # Find the lowest energy for a specific state
                 self._custom_steps()
+            if self.sim_settings["fully_intercalated"] is True:
+                logger.info("CUSTOM: Optimizing fully intercalated configuration")
+                self._i_state = 0
+                self.optimize_initial_configuration()
+            if self.sim_settings["fully_deintercalated"] is True:
+                logger.info("CUSTOM: Optimizing fully deintercalated configuration")
+                self.optimize_last_configuration()
             if self.sim_settings["post_process"] is True:
                 logger.debug("CUSTOM: Post processing")
                 # Assuming you have all the state csv files, find the convex hull

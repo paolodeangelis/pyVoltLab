@@ -26,6 +26,8 @@ DEFAULTS_MACE = {
     "steps_id": None,
     "post_process": False,
     "finish_interrupted_step": False,
+    "fully_intercalated": False,
+    "fully_deintercalated": False,
     "plot_frequency": 1,
 }
 
@@ -78,6 +80,8 @@ DEFAULTS_DFT = {
     "steps_id": None,
     "post_process": False,
     "finish_interrupted_step": False,
+    "fully_intercalated": False,
+    "fully_deintercalated": False,
     "plot_frequency": 1,
 }
 
