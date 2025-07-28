@@ -30,12 +30,11 @@ profiler_calc = MethodProfiler(name="Profiling Calculation")
 
 
 class VoltageCalculator:
-    def __init__(self, states_files, working_ion, working_ion_energy, charge_carried, voltage_max):
+    def __init__(self, states_files, working_ion, working_ion_energy, charge_carried):
         self.charge_carried = charge_carried
         self.states_files = states_files
         self.working_ion = working_ion
         self.working_ion_energy = working_ion_energy
-        self.voltage_max = voltage_max
         self._state_energy = {}
         self._state_formation_energy = []
         self._energy_full = 0
@@ -71,6 +70,19 @@ class VoltageCalculator:
             - _formula_empty: The formula of the state with the minimum working ions.
             - _energy_full: Energy of the state with the maximum working ions.
             - _energy_empty: Energy of the state with the minimum working ions.
+        """
+        if len(self._state_energy[self._formula_full]) > 1:
+            print("Too many energy in full state")
+            print(self._state_energy[self._formula_full])
+        self._energy_full = self._state_energy[self._formula_full]
+        if len(self._state_energy[self._formula_empty]) > 1:
+            print(self._state_energy[self._formula_empty])
+            print("Too many energy in empty state")
+        self._energy_empty = self._state_energy[self._formula_empty]
+
+    def get_n_max(self):
+        """
+        Attributes Updated:
             - _n_ion_max: Maximum number of working ions in any state.
         """
         n_min = float("inf")
@@ -90,15 +102,7 @@ class VoltageCalculator:
         logger.debug(
             f"Full state: {self._formula_full} with # ions: {n_max}, empty state: {self._formula_empty} with # ions: {n_min}, working ion: {self.working_ion} with energy {self.working_ion_energy}"
         )
-        if len(self._state_energy[self._formula_full]) > 1:
-            print("Too many energy in full state")
-            print(self._state_energy[self._formula_full])
-        self._energy_full = self._state_energy[self._formula_full]
         self._n_ion_max = n_max
-        if len(self._state_energy[self._formula_empty]) > 1:
-            print(self._state_energy[self._formula_empty])
-            print("Too many energy in empty state")
-        self._energy_empty = self._state_energy[self._formula_empty]
 
     def get_reduce_factor(self):
         self.reduce_factor = Formula(self._formula_full).reduce()[1]
@@ -123,10 +127,14 @@ class VoltageCalculator:
         hull_points = hull_points[np.argsort(hull_points[:, 0])]
         self._stable_points = hull_points
 
+    def get_number_of_ions(self):
+        self.get_state_energy()
+        self.get_n_max()
+        self.get_reduce_factor()
+        self.number_of_ions = self._n_ion_max / self.reduce_factor
+
     def get_voltage(self):
         self.voltage_steps = np.zeros((self._stable_points.shape[0] - 1, 3))
-        self.number_of_ions = self._n_ion_max / self.reduce_factor
-        logger.debug(f"Number of ions in unit formula: {self.number_of_ions}")
         e_full_per_formula = self._energy_full / self.reduce_factor
         e_empty_per_formula = self._energy_empty / self.reduce_factor
         for i in range(1, self._stable_points.shape[0]):
@@ -140,8 +148,6 @@ class VoltageCalculator:
             )
             delta_x = x2 - x1
             voltage = -delta_e / (delta_x * self.number_of_ions * self.charge_carried)  # Voltage in volts
-            if voltage[0] > self.voltage_max:
-                raise ValueError(f"Voltage (={voltage[0]}) exceeds the maximum limit of {self.voltage_max} V.")
             # self.voltage_steps.append([float(x1), float(x2), float(voltage)])
             self.voltage_steps[i - 1, :] = [
                 x1,
@@ -304,7 +310,10 @@ class VoltageProfile(BaseSimulation):
             elif len(files) == 1:  # in automatic restart, this state must be the initial state (fully intercalated)
                 logger.info("Continue: optimizing the final state")
                 # _file = files[0]
+
                 self.optimize_last_configuration()
+                self.check_voltage()
+
                 self.state_0 = self.system.copy()
                 cont_state = 0
             elif (
@@ -390,9 +399,12 @@ class VoltageProfile(BaseSimulation):
             logger.info(f" State {self._i_state} ".center(120, "-"))
             if self._i_state == 0:
 
-                energy_end = self.optimize_initial_configuration()
+                self.optimize_initial_configuration()
                 # self.update_files(energy_end)
-                self.optimize_last_configuration()
+                energy_end = self.optimize_last_configuration()
+
+                self.update_files(energy_end)
+                self.check_voltage()
                 self.update_states()
 
             else:
@@ -402,7 +414,7 @@ class VoltageProfile(BaseSimulation):
                 self.update_files(energy_end)
                 self.update_states()
 
-    def optimize_initial_configuration(self) -> float:
+    def optimize_initial_configuration(self) -> None:
         """
         Optimize fully intercalated system
         """
@@ -446,9 +458,8 @@ class VoltageProfile(BaseSimulation):
         # self._energy_store_thermo.append(self.state_1.get_potential_energy())
         # self.save_state()
         # self.state_0 = opt_state.copy()
-        return energy_end
 
-    def optimize_last_configuration(self):
+    def optimize_last_configuration(self) -> float:
         """
         Optimize fully de-intercalated system
         """
@@ -457,10 +468,41 @@ class VoltageProfile(BaseSimulation):
         self.state_1 = self.system.copy()
         num_Li_to_be_removed = self.n_states - 1
         atom_to_remove = np.where(self.state_1.get_atomic_numbers() == atomic_numbers[self.element])[0]
-        self._remove(
+        deintercalated_energy = self._remove(
             self.state_1, num_Li_to_be_removed, atom_to_remove, final=True
         )  # if I use this, in the csv file the format will not work in the semi brute force method
         self.state_1 = self.system.copy()  # to give correct state_1 for the next step
+        return deintercalated_energy
+
+    def check_voltage(self) -> None:
+        """
+        Check and stops calculations if the average voltage is higher or lower than specified values (if given)
+        """
+        self._voltage = VoltageCalculator(
+            self.saved_state_files,
+            self.element,
+            self.chemical_potential,
+            self._charge_carried,
+        )
+        self._voltage.get_state_energy()
+        self._voltage.get_number_of_ions()
+        self._voltage.get_reduce_factor()
+        intercalated_energy = self._voltage._state_energy[f"{self._voltage._formula_full}"]
+        deintercalated_energy = self._voltage._state_energy[f"{self._voltage._formula_empty}"]
+        ave_voltage = -(
+            intercalated_energy / self._voltage.reduce_factor
+            - deintercalated_energy / self._voltage.reduce_factor
+            - (self._voltage.number_of_ions * self.chemical_potential)
+        ) / (self._voltage.number_of_ions * self._charge_carried)
+        logger.info(f"Initial average voltage estimation {ave_voltage}")
+        if self.sim_settings["voltage_max"] is not None and ave_voltage > self.sim_settings["voltage_max"]:
+            raise ValueError(
+                f"Voltage (={ave_voltage}) exceeds the maximum limit of {self.sim_settings["voltage_max"]} V."
+            )
+        elif self.sim_settings["voltage_min"] is not None and ave_voltage < self.sim_settings["voltage_min"]:
+            raise ValueError(
+                f"Voltage (={ave_voltage}) subceeds the minmum limit of {self.sim_settings["voltage_min"]} V."
+            )
 
     # Change Abstract methods
     def _load_system(self) -> None:
@@ -900,6 +942,7 @@ class VoltageProfile(BaseSimulation):
         TODO: add more info (eq.s)
         """
         self._voltage_calculator.get_state_energy()
+        self._voltage_calculator.get_n_max()
         self._voltage_calculator.get_extremes()
         self._voltage_calculator.get_reduce_factor()
         self._voltage_calculator.get_formation_energy()
@@ -919,6 +962,7 @@ class VoltageProfile(BaseSimulation):
         Compute voltage profile from convex hull
         TODO: add more info (eq.s)
         """
+        self._voltage_calculator.get_number_of_ions()
         self._voltage_calculator.get_voltage()
 
     @profiler_io.track
@@ -1013,7 +1057,6 @@ class VoltageProfile(BaseSimulation):
             self.element,
             self.chemical_potential,
             self._charge_carried,
-            self.sim_settings["voltage_max"],
         )
         self.compute_convexhull()
         self.write_convexhull()
@@ -1083,13 +1126,6 @@ class VoltageProfile(BaseSimulation):
             self.plot_hull_and_voltage("convex_hull_voltage_profile")
         elif self.sim_settings["continue"].upper() == "CUSTOM":
             logger.info("Continuing simulation with custom settings")
-            if self.sim_settings["finish_interrupted_step"] is True:
-                logger.info("CUSTOM: Finish last interrupted step")
-                self._custom_finish_interrupted_step()
-            if isinstance(self.sim_settings["steps_id"], (int, list)):
-                logger.info(f"CUSTOM: Continuing simulation with custom step/s {self.sim_settings['steps_id']}")
-                # Find the lowest energy for a specific state
-                self._custom_steps()
             if self.sim_settings["fully_intercalated"] is True:
                 logger.info("CUSTOM: Optimizing fully intercalated configuration")
                 self._i_state = 0
@@ -1097,6 +1133,13 @@ class VoltageProfile(BaseSimulation):
             if self.sim_settings["fully_deintercalated"] is True:
                 logger.info("CUSTOM: Optimizing fully deintercalated configuration")
                 self.optimize_last_configuration()
+            if self.sim_settings["finish_interrupted_step"] is True:
+                logger.info("CUSTOM: Finish last interrupted step")
+                self._custom_finish_interrupted_step()
+            if isinstance(self.sim_settings["steps_id"], (int, list)):
+                logger.info(f"CUSTOM: Continuing simulation with custom step/s {self.sim_settings['steps_id']}")
+                # Find the lowest energy for a specific state
+                self._custom_steps()
             if self.sim_settings["post_process"] is True:
                 logger.debug("CUSTOM: Post processing")
                 # Assuming you have all the state csv files, find the convex hull

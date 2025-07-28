@@ -22,7 +22,8 @@ DEFAULTS_MACE = {
     },
     "states folder": "states",
     "plots folder": "plots",
-    "voltage_max": 10.0,  # Maximum voltage in volts
+    "voltage_max": None,  # Maximum voltage in volts
+    "voltage_min": None,  # Minmum voltage in volts
     "steps_id": None,
     "post_process": False,
     "finish_interrupted_step": False,
@@ -73,7 +74,8 @@ DEFAULTS_DFT = {
         "voltage": "voltage.csv",
         "convex hull": "convexhull.csv",
     },
-    "voltage_max": 10.0,  # Maximum voltage in volts
+    "voltage_max": None,  # Maximum voltage in volts
+    "voltage_min": None,
     "states folder": "states",
     "plots folder": "plots",
     "QE_dir": "QE",
