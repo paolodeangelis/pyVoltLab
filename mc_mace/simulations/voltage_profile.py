@@ -312,7 +312,7 @@ class VoltageProfile(BaseSimulation):
                 # _file = files[0]
 
                 self.optimize_last_configuration()
-                self.check_voltage()
+                self.check_ave_voltage()
 
                 self.state_0 = self.system.copy()
                 cont_state = 0
@@ -404,7 +404,7 @@ class VoltageProfile(BaseSimulation):
                 energy_end = self.optimize_last_configuration()
 
                 self.update_files(energy_end)
-                self.check_voltage()
+                self.check_ave_voltage()
                 self.update_states()
 
             else:
@@ -474,9 +474,26 @@ class VoltageProfile(BaseSimulation):
         self.state_1 = self.system.copy()  # to give correct state_1 for the next step
         return deintercalated_energy
 
-    def check_voltage(self) -> None:
+    def check_ave_voltage(self) -> None:
         """
-        Check and stops calculations if the average voltage is higher or lower than specified values (if given)
+        Check if the average voltage is within specified limits and stop the calculation if not.
+
+        This method is called after optimizing the fully intercalated and de-intercalated states.
+        It computes the average voltage using only the energies of these two extreme states.
+        If the estimated average voltage exceeds `voltage_max` or falls below `voltage_min` (as specified in `sim_settings`),
+        the calculation is stopped early by raising a ValueError.
+
+        Raises:
+            ValueError: If the average voltage is higher than `voltage_max` or lower than `voltage_min`.
+
+        Attributes Used:
+            - self.sim_settings["voltage_max"]: Maximum allowed voltage.
+            - self.sim_settings["voltage_min"]: Minimum allowed voltage.
+            - self._voltage._state_energy: Dictionary of state energies.
+            - self._voltage.reduce_factor: Reduction factor for normalization.
+            - self._voltage.number_of_ions: Number of working ions.
+            - self.chemical_potential: Chemical potential of the working ion.
+            - self._charge_carried: Charge carried by the working ion.
         """
         self._voltage = VoltageCalculator(
             self.saved_state_files,
@@ -490,8 +507,7 @@ class VoltageProfile(BaseSimulation):
         intercalated_energy = self._voltage._state_energy[f"{self._voltage._formula_full}"]
         deintercalated_energy = self._voltage._state_energy[f"{self._voltage._formula_empty}"]
         ave_voltage = -(
-            intercalated_energy / self._voltage.reduce_factor
-            - deintercalated_energy / self._voltage.reduce_factor
+            (intercalated_energy - deintercalated_energy) / self._voltage.reduce_factor
             - (self._voltage.number_of_ions * self.chemical_potential)
         ) / (self._voltage.number_of_ions * self._charge_carried)
         logger.info(f"Initial average voltage estimation {ave_voltage}")
@@ -503,6 +519,23 @@ class VoltageProfile(BaseSimulation):
             raise ValueError(
                 f"Voltage (={ave_voltage}) subceeds the minmum limit of {self.sim_settings["voltage_min"]} V."
             )
+
+    def check_delta_voltage(self) -> None:
+        """
+        Check the delta voltage after the first intercalation step.
+        Raises:
+            ValueError: If the voltage step is lower than the minimum or higher than the maximum limit.
+        """
+        if self._i_state == 1:
+            delta = self._voltage_calculator.voltage_steps[0][2] - self._voltage_calculator.voltage_steps[1][2]
+            if delta < self.sim_settings["voltage_min"]:
+                raise ValueError(
+                    f"$\delta$ Voltage (={delta}) is lower than the minimum limit of {self.sim_settings['voltage_min']} V."
+                )
+            elif delta > self.sim_settings["voltage_max"]:
+                raise ValueError(
+                    f"$\delta$ Voltage (={delta}) is higher than the maximum limit of {self.sim_settings['voltage_max']} V."
+                )
 
     # Change Abstract methods
     def _load_system(self) -> None:
@@ -557,7 +590,7 @@ class VoltageProfile(BaseSimulation):
                 atoms.calc = self.calculator
                 atoms, energy_end = self._optimize_system(atoms)
                 mu = float(energy_end / len(atoms))
-                logger.debug(f"mu({element}) = {mu:.3f} eV")
+                logger.info(f"mu({element}) = {mu:.3f} eV")
                 self.sim_settings["working ion"]["chemical potential"][element] = mu  # type: ignore[index]
                 potentials.append(mu)
             else:
@@ -1070,6 +1103,7 @@ class VoltageProfile(BaseSimulation):
                     f"Plotting convex hull and voltage profile every {self.sim_settings['plot_frequency']} steps"
                 )
                 self.plot_hull_and_voltage(self._i_state)
+        self.check_delta_voltage()
 
     def plot_hull_and_voltage(self, plot_name):
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(7, 7))
