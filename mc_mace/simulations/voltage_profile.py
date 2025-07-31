@@ -513,11 +513,11 @@ class VoltageProfile(BaseSimulation):
         logger.info(f"Initial average voltage estimation {ave_voltage}")
         if self.sim_settings["voltage_max"] is not None and ave_voltage > self.sim_settings["voltage_max"]:
             raise ValueError(
-                f"Voltage (={ave_voltage}) exceeds the maximum limit of {self.sim_settings["voltage_max"]} V."
+                f"Voltage (={ave_voltage}) exceeds the maximum limit of {self.sim_settings['voltage_max']} V."
             )
         elif self.sim_settings["voltage_min"] is not None and ave_voltage < self.sim_settings["voltage_min"]:
             raise ValueError(
-                f"Voltage (={ave_voltage}) subceeds the minmum limit of {self.sim_settings["voltage_min"]} V."
+                f"Voltage (={ave_voltage}) subceeds the minmum limit of {self.sim_settings['voltage_min']} V."
             )
 
     def check_delta_voltage(self) -> None:
