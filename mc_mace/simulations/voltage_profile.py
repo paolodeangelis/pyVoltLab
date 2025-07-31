@@ -530,11 +530,11 @@ class VoltageProfile(BaseSimulation):
             delta = self._voltage_calculator.voltage_steps[0][2] - self._voltage_calculator.voltage_steps[1][2]
             if delta < self.sim_settings["voltage_min"]:
                 raise ValueError(
-                    f"$\delta$ Voltage (={delta}) is lower than the minimum limit of {self.sim_settings['voltage_min']} V."
+                    f"Δ Voltage (={delta}) is lower than the minimum limit of {self.sim_settings['voltage_min']} V."
                 )
             elif delta > self.sim_settings["voltage_max"]:
                 raise ValueError(
-                    f"$\delta$ Voltage (={delta}) is higher than the maximum limit of {self.sim_settings['voltage_max']} V."
+                    f"Δ Voltage (={delta}) is higher than the maximum limit of {self.sim_settings['voltage_max']} V."
                 )
 
     # Change Abstract methods
@@ -789,7 +789,7 @@ class VoltageProfile(BaseSimulation):
             for line in out.getvalue().splitlines():
                 logger.debug(self.__logger_prefix() + line)
             if not self._converged:
-                logger.warning(
+                raise RuntimeError(
                     f"The optimization with {self._optimizer_type} not converged after {self._max_steps} steps"
                 )
             self.state_1 = atoms
