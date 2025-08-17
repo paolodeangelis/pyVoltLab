@@ -305,7 +305,10 @@ class VoltageProfile(BaseSimulation):
         else:
             self.saved_state_files.extend(csv_files)
             if len(files) == self.n_states:
-                raise RuntimeError("Last state found, no more states to compute.")
+                #raise RuntimeError("Last state found, no more states to compute.")
+                logger.warning("Last state found, no more states to compute.")
+                self._custom_convex_hull()
+                self.post_process()
 
             elif len(files) == 1:  # in automatic restart, this state must be the initial state (fully intercalated)
                 logger.info("Continue: optimizing the final state")
@@ -519,23 +522,6 @@ class VoltageProfile(BaseSimulation):
             raise ValueError(
                 f"Voltage (={ave_voltage}) subceeds the minmum limit of {self.sim_settings['voltage_min']} V."
             )
-
-    def check_delta_voltage(self) -> None:
-        """
-        Check the delta voltage after the first intercalation step.
-        Raises:
-            ValueError: If the voltage step is lower than the minimum or higher than the maximum limit.
-        """
-        if self._i_state == 1:
-            delta = self._voltage_calculator.voltage_steps[0][2] - self._voltage_calculator.voltage_steps[1][2]
-            if delta < self.sim_settings["voltage_min"]:
-                raise ValueError(
-                    f"Δ Voltage (={delta}) is lower than the minimum limit of {self.sim_settings['voltage_min']} V."
-                )
-            elif delta > self.sim_settings["voltage_max"]:
-                raise ValueError(
-                    f"Δ Voltage (={delta}) is higher than the maximum limit of {self.sim_settings['voltage_max']} V."
-                )
 
     # Change Abstract methods
     def _load_system(self) -> None:
@@ -1103,7 +1089,6 @@ class VoltageProfile(BaseSimulation):
                     f"Plotting convex hull and voltage profile every {self.sim_settings['plot_frequency']} steps"
                 )
                 self.plot_hull_and_voltage(self._i_state)
-        self.check_delta_voltage()
 
     def plot_hull_and_voltage(self, plot_name):
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(7, 7))
