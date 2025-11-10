@@ -62,13 +62,6 @@ DEFAULTS_DFT = {
     "diagonalization": "david",
     "startingwfc": "atomic",
     "koffset": [0, 0, 0],
-    "nspin": 1,
-    "starting_magnetization(1)": 0.0,
-    "starting_magnetization(2)": 0.0,
-    "starting_magnetization(3)": 0.0,
-    "starting_magnetization(4)": 0.0,
-    "starting_magnetization(5)": 0.0,
-    "starting_magnetization(6)": 0.0,
     "nosym": False,
     #
     "optimizer": {
@@ -93,6 +86,7 @@ DEFAULTS_DFT = {
     "fully_intercalated": False,
     "fully_deintercalated": False,
     "plot_frequency": 1,
+    "additional_cards": None,
 }
 
 # List of required parameters
