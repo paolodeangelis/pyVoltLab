@@ -7,8 +7,8 @@ pyMC
 
 Monte Carlo model using ASE python library
 
-# MC-MACE: Voltage Profile Generation
-This repository provides the implementation for generating voltage profiles as presented in the paper: 
+# Voltage Profile Generation
+This repository provides the implementation for generating voltage profiles as presented in the preprint: 
 **["Screening novel cathode materials from the Energy-GNoME database using MACE machine learning force field and DFT"](https://doi.org/10.48550/arXiv.2511.22504)**.
 
 ## Installation
@@ -17,6 +17,7 @@ Ensure you have Python installed. Navigate to the root folder (where `pyproject.
 
 ```bash
 pip install .
+```
 
 # Copyright
 
