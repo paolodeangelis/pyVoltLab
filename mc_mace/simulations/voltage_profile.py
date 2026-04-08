@@ -251,13 +251,6 @@ class VoltageProfile(BaseSimulation):
             "startingwfc": self.sim_settings["startingwfc"],
             "ecutwfc": self.sim_settings["ecutwfc"],
             "ecutrho": self.sim_settings["ecutrho"],
-            "nspin": self.sim_settings["nspin"],
-            "starting_magnetization(1)": self.sim_settings["starting_magnetization(1)"],
-            "starting_magnetization(2)": self.sim_settings["starting_magnetization(2)"],
-            "starting_magnetization(3)": self.sim_settings["starting_magnetization(3)"],
-            "starting_magnetization(4)": self.sim_settings["starting_magnetization(4)"],
-            "starting_magnetization(5)": self.sim_settings["starting_magnetization(5)"],
-            "starting_magnetization(6)": self.sim_settings["starting_magnetization(6)"],
         }
         return pw_input
 
