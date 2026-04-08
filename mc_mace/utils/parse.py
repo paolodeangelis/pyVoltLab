@@ -93,6 +93,7 @@ DEFAULTS_DFT = {
     "fully_intercalated": False,
     "fully_deintercalated": False,
     "plot_frequency": 1,
+    "additional_cards": None,
 }
 
 # List of required parameters

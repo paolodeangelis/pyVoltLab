@@ -544,14 +544,25 @@ class VoltageProfile(BaseSimulation):
 
         elif "calculation" in self.sim_settings:
             logger.debug("Loading Quantum espresso calculator")
-            self.calculator = Espresso(
-                input_data=self._pw_input_file(),
-                profile=self._get_profile(),
-                pseudopotentials=self.sim_settings["pseudopotentials"],
-                kpts=self.sim_settings["kpts"],
-                koffset=self.sim_settings["koffset"],
-                directory=self.sim_settings["QE_dir"] + "/" + sub_file,
-            )
+            if self.sim_settings["additional_cards"] is not None:
+                self.calculator = Espresso(
+                    input_data=self._pw_input_file(),
+                    profile=self._get_profile(),
+                    pseudopotentials=self.sim_settings["pseudopotentials"],
+                    kpts=self.sim_settings["kpts"],
+                    koffset=self.sim_settings["koffset"],
+                    additional_cards=self.sim_settings["additional_cards"],
+                    directory=self.sim_settings["QE_dir"] + "/" + sub_file,
+                )
+            else:
+                self.calculator = Espresso(
+                    input_data=self._pw_input_file(),
+                    profile=self._get_profile(),
+                    pseudopotentials=self.sim_settings["pseudopotentials"],
+                    kpts=self.sim_settings["kpts"],
+                    koffset=self.sim_settings["koffset"],
+                    directory=self.sim_settings["QE_dir"] + "/" + sub_file,
+                )
 
     def _compute_chemical_potentials(self) -> tuple[list[str], list[float]]:
         """
