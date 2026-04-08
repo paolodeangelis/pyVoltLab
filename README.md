@@ -19,6 +19,25 @@ Ensure you have Python installed. Navigate to the root folder (where `pyproject.
 pip install .
 ```
 
+## Usage
+
+To generate the voltage profile for the **LiCoO2** example provided in the repository:
+
+### 1. Navigate to the example directory
+
+```bash
+cd examples/LiCoO2
+```
+
+### 2. Run the simulation
+
+Execute the script using the provided configuration:
+
+```
+python3 ../../build/lib/mc_mace/pymc.py zerok-voltage settings.yaml
+
+```
+
 # Copyright
 
 Copyright (c) 2024-2026, Paolo De Angelis, Nada Alghamdi
