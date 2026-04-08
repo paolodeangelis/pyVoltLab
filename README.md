@@ -7,12 +7,23 @@ pyMC
 
 Monte Carlo model using ASE python library
 
-### Copyright
+# MC-MACE: Voltage Profile Generation
+This repository provides the implementation for generating voltage profiles as presented in the paper: 
+**["Screening novel cathode materials from the Energy-GNoME database using MACE machine learning force field and DFT"](https://doi.org/10.48550/arXiv.2511.22504)**.
 
-Copyright (c) 2024, Paolo De Angelis
+## Installation
+It is recommended to use a virtual environment (**venv**) or **Conda** to manage dependencies.
+Ensure you have Python installed. Navigate to the root folder (where `pyproject.toml` is located) and run:
+
+```bash
+pip install .
+
+# Copyright
+
+Copyright (c) 2024-2026, Paolo De Angelis, Nada Alghamdi
 
 
-#### Acknowledgements
+# Acknowledgements
 
 Project based on the
 [Computational Molecular Science Python Cookiecutter](https://github.com/molssi/cookiecutter-cms) version 1.10.
