@@ -8,6 +8,7 @@ from loguru import logger
 DEFAULTS_MACE = {
     "continue": False,
     "removal_method": "semi_brute_force",
+    "plots": True,
     "optimizer": {
         "type": "FIRE2",
         "fmax": 0.05,
@@ -20,9 +21,15 @@ DEFAULTS_MACE = {
         "convex hull": "convexhull.csv",
     },
     "states folder": "states",
+    "plots folder": "plots",
+    "voltage_max": None,  # Maximum voltage in volts
+    "voltage_min": None,  # Minmum voltage in volts
     "steps_id": None,
     "post_process": False,
     "finish_interrupted_step": False,
+    "fully_intercalated": False,
+    "fully_deintercalated": False,
+    "plot_frequency": 1,
 }
 
 # List of required parameters
@@ -32,6 +39,7 @@ REQUIRED_ENTRIES_MACE = ["system", "working ion", "mace_model"]
 DEFAULTS_DFT = {
     "continue": False,
     "removal_method": "semi_brute_force",
+    "plots": True,
     "calculation": "scf",
     "restart_mode": "from_scratch",
     "verbosity": "low",
@@ -54,6 +62,7 @@ DEFAULTS_DFT = {
     "diagonalization": "david",
     "startingwfc": "atomic",
     "koffset": [0, 0, 0],
+    "nosym": False,
     #
     "optimizer": {
         "type": "FIRE2",
@@ -66,11 +75,18 @@ DEFAULTS_DFT = {
         "voltage": "voltage.csv",
         "convex hull": "convexhull.csv",
     },
+    "voltage_max": None,  # Maximum voltage in volts
+    "voltage_min": None,
     "states folder": "states",
+    "plots folder": "plots",
     "QE_dir": "QE",
     "steps_id": None,
     "post_process": False,
     "finish_interrupted_step": False,
+    "fully_intercalated": False,
+    "fully_deintercalated": False,
+    "plot_frequency": 1,
+    "additional_cards": None,
 }
 
 # List of required parameters

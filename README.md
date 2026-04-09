@@ -7,12 +7,43 @@ pyMC
 
 Monte Carlo model using ASE python library
 
-### Copyright
+# Voltage Profile Generation
+This repository provides the implementation for generating voltage profiles as presented in the preprint: 
+**["Screening novel cathode materials from the Energy-GNoME database using MACE machine learning force field and DFT"](https://doi.org/10.48550/arXiv.2511.22504)**.
 
-Copyright (c) 2024, Paolo De Angelis
+## Installation
+It is recommended to use a virtual environment (**venv**) or **Conda** to manage dependencies.
+Ensure you have Python installed. Navigate to the root folder (where `pyproject.toml` is located) and run:
+
+```bash
+pip install .
+```
+
+## Usage
+
+To generate the voltage profile for the **LiCoO2** example provided in the repository:
+
+### 1. Navigate to the example directory
+
+```bash
+cd examples/LiCoO2
+```
+
+### 2. Run the simulation
+
+Execute the script using the provided configuration:
+
+```
+python3 ../../build/lib/mc_mace/pymc.py zerok-voltage settings.yaml
+
+```
+
+# Copyright
+
+Copyright (c) 2024-2026, Paolo De Angelis, Nada Alghamdi
 
 
-#### Acknowledgements
+# Acknowledgements
 
 Project based on the
 [Computational Molecular Science Python Cookiecutter](https://github.com/molssi/cookiecutter-cms) version 1.10.
