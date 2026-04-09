@@ -1,16 +1,14 @@
-pyMC
-==============================
-[//]: # (Badges)
-[![GitHub Actions Build Status](https://github.com/REPLACE_WITH_OWNER_ACCOUNT/mc_mace/workflows/CI/badge.svg)](https://github.com/REPLACE_WITH_OWNER_ACCOUNT/mc_mace/actions?query=workflow%3ACI)
-[![codecov](https://codecov.io/gh/REPLACE_WITH_OWNER_ACCOUNT/pyMC/branch/main/graph/badge.svg)](https://codecov.io/gh/REPLACE_WITH_OWNER_ACCOUNT/pyMC/branch/main)
+# ⚡ Voltage Profile Generator
 
+🚧 Under active development — this is not the final version. Further improvements, optimizations, and updates are on the way.
 
-Monte Carlo model using ASE python library
-
-# Voltage Profile Generation
 This repository provides the implementation for generating voltage profiles as presented in the preprint: 
-**["Screening novel cathode materials from the Energy-GNoME database using MACE machine learning force field and DFT"](https://doi.org/10.48550/arXiv.2511.22504)**.
 
+[![arXiv](https://img.shields.io/badge/arXiv-2510.05020-b31b1b.svg)](https://doi.org/10.48550/arXiv.2511.22504)
+[![DOI](https://img.shields.io/badge/DOI-10.48550/arXiv.2510.05020-blue)](https://doi.org/10.48550/arXiv.2511.22504)
+
+**Screening novel cathode materials from the Energy-GNoME database using MACE machine learning force field and DFT.**
+Nada Alghamdi, Paolo de Angelis, Pietro Asinari, Eliodoro Chiavazzo
 ## Installation
 It is recommended to use a virtual environment (**venv**) or **Conda** to manage dependencies.
 Ensure you have Python installed. Navigate to the root folder (where `pyproject.toml` is located) and run:
