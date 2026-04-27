@@ -1,6 +1,6 @@
 continue: False
 removal_method: semi_brute_force
-system: ./2x1x1_LiCoO2.cif 
+system: ./2x1x1_LiCoO2.cif
 mace_model: ../MACE-matpes-r2scan-omat-ft.model
 optimizer:
   type: FIRE2
