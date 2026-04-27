@@ -2,7 +2,7 @@
 
 🚧 Under active development — this is not the final version. Further improvements, optimizations, and updates are on the way.
 
-This repository provides the implementation for generating voltage profiles as presented in the preprint: 
+This repository provides the implementation for generating voltage profiles as presented in the preprint:
 
 [![arXiv](https://img.shields.io/badge/arXiv-2510.05020-b31b1b.svg)](https://doi.org/10.48550/arXiv.2511.22504)
 [![DOI](https://img.shields.io/badge/DOI-10.48550/arXiv.2510.05020-blue)](https://doi.org/10.48550/arXiv.2511.22504)
