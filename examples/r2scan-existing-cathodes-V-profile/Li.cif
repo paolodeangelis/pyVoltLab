@@ -4,7 +4,7 @@ loop_
 _publ_author_name
 'Barrett C S'
 _journal_name_full 'Acta Crystallographica'
-_journal_volume 9 
+_journal_volume 9
 _journal_year 1956
 _journal_page_first 671
 _journal_page_last 677
