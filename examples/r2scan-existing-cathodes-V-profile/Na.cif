@@ -124,4 +124,3 @@ loop_
  _atom_site_fract_z
  _atom_site_occupancy
   Na0+  Na0  2  0.00000000  0.00000000  0.00000000  1
-
