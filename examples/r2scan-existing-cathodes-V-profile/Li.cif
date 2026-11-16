@@ -58,4 +58,3 @@ _atom_site_fract_x
 _atom_site_fract_y
 _atom_site_fract_z
 Li   0.33333   0.66667   0.25000
-
